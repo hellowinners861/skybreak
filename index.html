@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+    <meta name="theme-color" content="#07111f" />
+    <title>SKYBREAK // Stage 1</title>
+  </head>
+  <body>
+    <main id="game-shell" aria-label="SKYBREAK Stage 1">
+      <canvas id="render-canvas" aria-label="3Dゲーム画面"></canvas>
+      <div id="speed-lines" aria-hidden="true"></div>
+
+      <section id="hud" aria-live="polite">
+        <div class="hud-topline">
+          <div class="brand">SKYBREAK <span>// STAGE 1</span></div>
+          <div class="status-pills">
+            <div id="coin-count" class="pill">コイン 0 / 12</div>
+            <div id="giant-hp" class="pill danger">巨人 HP 3 / 3</div>
+          </div>
+        </div>
+        <div class="objective-card">
+          <div class="eyebrow">OBJECTIVE / 目標</div>
+          <div id="objective">コインを8枚集めて、巨人を倒せ</div>
+          <div id="anchor-readout" class="anchor-readout">照準アンカーを探しています…</div>
+        </div>
+        <div id="message" class="message" role="status"></div>
+        <div class="desktop-help">WASD 移動　｜　マウスドラッグ カメラ　｜　Space ワイヤー　｜　Shift ブースト　｜　E 攻撃　｜　R リトライ</div>
+      </section>
+
+      <div class="reticle" aria-hidden="true"><span></span></div>
+
+      <section id="touch-ui" aria-label="タッチ操作">
+        <div id="stick-zone" class="stick-zone" aria-label="移動スティック">
+          <div class="stick-ring"><div id="stick-knob" class="stick-knob"></div></div>
+          <span>MOVE</span>
+        </div>
+        <div class="touch-actions">
+          <button id="boost-button" class="action-button boost" type="button"><span>BOOST</span><small>加速</small></button>
+          <button id="attack-button" class="action-button attack" type="button"><span>ATTACK</span><small>攻撃</small></button>
+          <button id="wire-button" class="action-button wire" type="button"><span id="wire-label">WIRE</span><small>タップ切替</small></button>
+        </div>
+      </section>
+
+      <section id="clear-screen" class="modal-card is-hidden" aria-live="assertive">
+        <div class="clear-kicker">MISSION COMPLETE</div>
+        <h1>STAGE CLEAR</h1>
+        <p>空を切り拓いた。コイン <span id="clear-coins">0</span> 枚 / 巨人撃破。</p>
+        <button id="retry-button" type="button">もう一度飛ぶ <span>↻</span></button>
+      </section>
+    </main>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
