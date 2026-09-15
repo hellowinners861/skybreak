@@ -13,6 +13,7 @@ import {
   UniversalCamera,
   Vector3,
 } from "@babylonjs/core";
+import { airMomentumStep, collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack, wireLaunchVelocity } from "./gameplay";
 import "./style.css";
 
 type AnchorKind = "building" | "giant";
@@ -51,6 +52,7 @@ const coinCount = select<HTMLElement>("#coin-count");
 const giantHpReadout = select<HTMLElement>("#giant-hp");
 const objective = select<HTMLElement>("#objective");
 const anchorReadout = select<HTMLElement>("#anchor-readout");
+const routeReadout = select<HTMLElement>("#route-readout");
 const message = select<HTMLElement>("#message");
 const speedLines = select<HTMLElement>("#speed-lines");
 const stickZone = select<HTMLElement>("#stick-zone");
@@ -62,6 +64,7 @@ const wireLabel = select<HTMLElement>("#wire-label");
 const clearScreen = select<HTMLElement>("#clear-screen");
 const clearCoins = select<HTMLElement>("#clear-coins");
 const retryButton = select<HTMLButtonElement>("#retry-button");
+const quickRetryButton = select<HTMLButtonElement>("#quick-retry");
 
 const engine = new Engine(canvas, true, {
   antialias: true,
@@ -249,6 +252,7 @@ for (let index = 0; index < coinPositions.length; index += 1) {
   coin.isPickable = false;
   coins.push({ mesh: coin, collected: false });
 }
+const progress = createProgressState(coins.length, 3);
 
 const lineCount = 18;
 for (let index = 0; index < lineCount; index += 1) {
@@ -385,6 +389,10 @@ const toggleWire = (): void => {
   }
   attachedAnchor = candidateAnchor;
   ropeLength = clamp(candidateDistance, 12, 88);
+  const launchVelocity = wireLaunchVelocity(grounded, playerPosition.y, playerHalfHeight, candidateAnchor.position.y, velocity.y);
+  const towardAnchor = candidateAnchor.position.subtract(playerPosition).normalize();
+  velocity.y = launchVelocity;
+  velocity.addInPlace(towardAnchor.scale(2.2));
   grounded = false;
   playerMaterial.emissiveColor = hex("#1fa2ba");
   showMessage(`${candidateAnchor.name} に接続`, "good");
@@ -473,31 +481,38 @@ const respawn = (): void => {
 };
 
 const collectCoins = (): void => {
-  for (const coin of coins) {
+  for (let index = 0; index < coins.length; index += 1) {
+    const coin = coins[index];
     if (coin.collected) continue;
     if (Vector3.Distance(playerPosition, coin.mesh.position) > 5.2) continue;
+    if (!collectCoin(progress, index)) continue;
     coin.collected = true;
     coin.mesh.setEnabled(false);
-    coinsCollected += 1;
+    coinsCollected = progress.collectedCount;
     showMessage(`コイン取得　${coinsCollected} / 12`, "good");
   }
 };
 
 const attack = (): void => {
   if (stageCleared || attackCooldown > 0) return;
-  attackCooldown = 0.62;
   attackButton.classList.add("active");
   window.setTimeout(() => attackButton.classList.remove("active"), 110);
   const distance = Vector3.Distance(playerPosition, weakpoint.position);
-  if (giantHp <= 0) {
+  const result = tryAttack(progress, distance <= 22);
+  attackCooldown = progress.attackCooldown;
+  giantHp = progress.giantHp;
+  if (result === "defeated") {
     showMessage("巨人はすでに倒れている", "good");
     return;
   }
-  if (distance > 22) {
+  if (result === "cooldown") {
+    showMessage("攻撃準備中", "warn");
+    return;
+  }
+  if (result === "out-of-range") {
     showMessage("弱点へ近づいて攻撃", "warn");
     return;
   }
-  giantHp -= 1;
   weakpointFlash = 0.3;
   showMessage(`弱点ヒット　残りHP ${giantHp}`, "good");
   if (giantHp <= 0) showMessage("巨人撃破。コインを8枚集めよう", "good");
@@ -505,13 +520,15 @@ const attack = (): void => {
 
 const resetStage = (): void => {
   detachWire(false);
+  resetPointersAndKeys();
   playerPosition.copyFrom(spawnPosition);
   lastSafePosition.copyFrom(spawnPosition);
   velocity.copyFromFloats(0, 0, 0);
   grounded = true;
-  coinsCollected = 0;
-  giantHp = 3;
-  attackCooldown = 0;
+  resetProgress(progress);
+  coinsCollected = progress.collectedCount;
+  giantHp = progress.giantHp;
+  attackCooldown = progress.attackCooldown;
   weakpointFlash = 0;
   stageCleared = false;
   cameraYaw = 0.64;
@@ -532,6 +549,23 @@ const updateHud = (): void => {
   else if (giantHp <= 0) objective.textContent = `あと${Math.max(0, 8 - coinsCollected)}枚のコインを集めよう`;
   else if (coinsCollected >= 8) objective.textContent = "巨人の弱点へ近づいて攻撃しよう";
   else objective.textContent = `コインを8枚集めて、巨人を倒せ（${coinsCollected} / 8）`;
+
+  const nextCoin = coins.find((coin) => !coin.collected);
+  const target = giantHp > 0 && coinsCollected >= 8 ? weakpoint.position : nextCoin?.mesh.position;
+  if (target) {
+    const offset = target.subtract(playerPosition);
+    const horizontalDistance = Math.hypot(offset.x, offset.z);
+    const targetDirection = offset.normalize();
+    const forward = new Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+    const right = new Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+    const forwardDot = Vector3.Dot(targetDirection, forward);
+    const heading = forwardDot > 0.72 ? "正面" : (forwardDot < -0.2 ? "背後" : (Vector3.Dot(targetDirection, right) >= 0 ? "右" : "左"));
+    routeReadout.textContent = giantHp > 0 && coinsCollected >= 8
+      ? `巨人の弱点：${Math.round(horizontalDistance)}m / ${heading}`
+      : `次のコイン：${Math.round(horizontalDistance)}m / ${heading}`;
+  } else {
+    routeReadout.textContent = "目標ルート完了";
+  }
 
   if (attachedAnchor) {
     anchorReadout.textContent = `接続中：${attachedAnchor.name}　${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m　｜ タップで解除`;
@@ -603,16 +637,19 @@ const updatePhysics = (dt: number): void => {
       playerPosition.copyFrom(next);
     }
     resolveAttachedPenetration();
-    grounded = false;
+    grounded = playerPosition.y <= playerHalfHeight + 0.01;
   } else {
-    const airControl = grounded ? 19 : 7;
-    const desiredX = movement.x * (isBoosting() ? 18 : 13);
-    const desiredZ = movement.z * (isBoosting() ? 18 : 13);
-    velocity.x = approach(velocity.x, desiredX, airControl * dt);
-    velocity.z = approach(velocity.z, desiredZ, airControl * dt);
-    if (movement.lengthSquared() < 0.001 && grounded) {
-      velocity.x = approach(velocity.x, 0, 22 * dt);
-      velocity.z = approach(velocity.z, 0, 22 * dt);
+    if (grounded) {
+      const desiredX = movement.x * (isBoosting() ? 18 : 13);
+      const desiredZ = movement.z * (isBoosting() ? 18 : 13);
+      velocity.x = approach(velocity.x, desiredX, 19 * dt);
+      velocity.z = approach(velocity.z, desiredZ, 19 * dt);
+      if (movement.lengthSquared() < 0.001) {
+        velocity.x = approach(velocity.x, 0, 22 * dt);
+        velocity.z = approach(velocity.z, 0, 22 * dt);
+      }
+    } else {
+      [velocity.x, velocity.z] = airMomentumStep(velocity.x, velocity.z, movement.x, movement.z, dt, isBoosting());
     }
     velocity.y += gravity * dt;
     if (isBoosting()) velocity.addInPlace(viewDirection().scale(26 * dt));
@@ -638,7 +675,8 @@ const updateWorld = (dt: number): void => {
   weakpointFlash = Math.max(0, weakpointFlash - dt);
   weakpoint.scaling.setAll(weakpointFlash > 0 ? 1.35 : 1);
   weakpointRing.scaling.setAll(weakpointFlash > 0 ? 1.18 : 1);
-  if (attackCooldown > 0) attackCooldown = Math.max(0, attackCooldown - dt);
+  tickAttackCooldown(progress, dt);
+  attackCooldown = progress.attackCooldown;
   collectCoins();
   findCandidate();
   updateCandidateMarker(dt);
@@ -648,7 +686,7 @@ const updateWorld = (dt: number): void => {
     safePositionTimer = 0;
     lastSafePosition.copyFrom(playerPosition);
   }
-  if (!stageCleared && coinsCollected >= 8 && giantHp <= 0) {
+  if (!stageCleared && isStageClear(progress)) {
     stageCleared = true;
     detachWire(false);
     clearCoins.textContent = String(coinsCollected);
@@ -735,6 +773,7 @@ wireButton.addEventListener("click", (event: MouseEvent) => {
   toggleWire();
 });
 retryButton.addEventListener("click", () => resetStage());
+quickRetryButton.addEventListener("click", () => resetStage());
 
 canvas.addEventListener("pointerdown", (event: PointerEvent) => {
   if (event.pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;

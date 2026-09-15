@@ -31,11 +31,13 @@ button { font: inherit; color: inherit; }
 .status-pills { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 .pill { padding: 8px 12px; border: 1px solid var(--line); border-radius: 999px; background: rgba(5, 16, 30, .75); font-size: 12px; font-weight: 900; letter-spacing: .03em; box-shadow: 0 5px 20px rgba(0,0,0,.18); }
 .pill.danger { border-color: rgba(255,109,113,.55); }
+.quick-retry { pointer-events: auto; width: 34px; height: 34px; border: 1px solid rgba(165,226,255,.48); border-radius: 50%; background: rgba(5,16,30,.72); color: var(--cyan); cursor: pointer; font-size: 20px; line-height: 1; }
 
 .objective-card { width: min(380px, 62vw); margin-top: 18px; padding: 12px 15px 13px; border-left: 3px solid var(--cyan); background: linear-gradient(90deg, var(--panel), rgba(5, 16, 30, .23)); backdrop-filter: blur(8px); }
 .eyebrow { color: var(--cyan); font: 700 11px/1 "Arial Narrow", "Yu Gothic UI", sans-serif; letter-spacing: .17em; }
 #objective { margin-top: 6px; font-size: clamp(13px, 1.8vw, 16px); font-weight: 900; }
 .anchor-readout { margin-top: 7px; color: var(--muted); font-size: 11px; }
+.route-readout { margin-top: 4px; color: rgba(255,212,90,.88); font-size: 11px; font-weight: 700; }
 
 .message { position: absolute; top: 33%; left: 50%; transform: translate(-50%, -50%); padding: 8px 15px; border: 1px solid rgba(81,236,255,.55); border-radius: 999px; background: rgba(4, 14, 28, .84); color: var(--cyan); font-size: 13px; font-weight: 900; letter-spacing: .04em; opacity: 0; transition: opacity .18s ease; white-space: nowrap; }
 .message.visible { opacity: 1; }
