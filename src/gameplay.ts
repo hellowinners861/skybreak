@@ -48,7 +48,7 @@ export const wireLaunchVelocity = (grounded: boolean, playerY: number, playerHal
 };
 
 export const airMomentumStep = (velocityX: number, velocityZ: number, inputX: number, inputZ: number, dt: number, boost: boolean): [number, number] => {
-  const steering = (boost ? 14 : 9) * dt;
+  const steering = (boost ? 18 : 15) * dt;
   const drag = Math.pow(0.997, dt * 60);
   return [
     velocityX * drag + inputX * steering,
