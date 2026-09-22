@@ -13,16 +13,18 @@ import {
   UniversalCamera,
   Vector3,
 } from "@babylonjs/core";
-import { airMomentumStep, collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack, wireLaunchVelocity } from "./gameplay";
+import { collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
+import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
 import "./style.css";
 
-type AnchorKind = "building" | "giant";
+type AnchorKind = "building" | "giant" | "course";
 
 type Anchor = {
   name: string;
   kind: AnchorKind;
   position: Vector3;
   mesh: Mesh;
+  courseIndex?: number;
 };
 
 type Building = {
@@ -139,11 +141,11 @@ const buildings: Building[] = [];
 const anchors: Anchor[] = [];
 const buildingPalette = ["#294965", "#325a74", "#3c516c", "#26546d", "#46556d"];
 const buildingLayouts: Array<[number, number, number, number, number]> = [
-  [-72, -72, 9, 8, 14], [-45, -75, 13, 8, 21], [-13, -74, 10, 10, 17], [20, -75, 13, 8, 25], [57, -72, 10, 10, 16],
-  [-78, -39, 12, 9, 18], [-46, -39, 9, 11, 27], [43, -39, 12, 10, 21], [74, -38, 10, 8, 13],
-  [-78, -4, 13, 10, 23], [-46, 2, 10, 9, 15], [53, 1, 11, 12, 24], [78, 4, 8, 9, 18],
-  [-76, 37, 11, 10, 16], [-43, 42, 10, 8, 22], [43, 39, 12, 9, 28], [73, 38, 9, 11, 18],
-  [-65, 72, 13, 9, 20], [-25, 71, 10, 11, 15], [62, 71, 12, 10, 24],
+  [-62, -72, 9, 8, 14], [-38, -72, 10, 8, 21], [38, -72, 10, 8, 17], [62, -72, 9, 8, 25],
+  [-70, -40, 12, 9, 18], [-42, -40, 9, 11, 27], [42, -40, 12, 10, 21], [70, -40, 10, 8, 13],
+  [-70, 0, 13, 10, 23], [-42, 2, 10, 9, 15], [42, 1, 11, 12, 24], [70, 4, 8, 9, 18],
+  [-70, 40, 11, 10, 16], [-42, 42, 10, 8, 22], [42, 39, 12, 9, 28], [70, 38, 9, 11, 18],
+  [-62, 72, 13, 9, 20], [-30, 72, 10, 11, 15], [30, 72, 10, 11, 24], [62, 72, 12, 10, 24],
 ];
 
 for (let index = 0; index < buildingLayouts.length; index += 1) {
@@ -171,6 +173,26 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   anchorMesh.isPickable = false;
   anchors.push({ name: `ビル ${String(index + 1).padStart(2, "0")}`, kind: "building", position: anchorPosition.clone(), mesh: anchorMesh });
   buildings.push({ mesh: building, x, z, halfX, halfZ, top: height });
+}
+
+const openingRoof = MeshBuilder.CreateBox("opening-roof", { width: 44, height: 40, depth: 16 }, scene);
+openingRoof.position = new Vector3(0, 20, -88);
+openingRoof.material = roofMaterial;
+buildings.push({ mesh: openingRoof, x: 0, z: -88, halfX: 22, halfZ: 8, top: 40 });
+
+const courseAnchorPositions = COURSE_ANCHORS.map(([x, y, z]) => new Vector3(x, y, z));
+for (let index = 0; index < courseAnchorPositions.length; index += 1) {
+  const point = courseAnchorPositions[index];
+  const supportX = point.x >= 0 ? 26 : -26;
+  const support = MeshBuilder.CreateBox(`course-support-${index + 1}`, { width: 4, height: point.y - 2, depth: 6 }, scene);
+  support.position = new Vector3(supportX, (point.y - 2) / 2, point.z);
+  support.material = material(`course-support-material-${index + 1}`, index % 2 === 0 ? "#1d5874" : "#254c6d", "#082536");
+  buildings.push({ mesh: support, x: supportX, z: point.z, halfX: 2, halfZ: 3, top: point.y - 2 });
+  const anchorMesh = MeshBuilder.CreateSphere(`course-anchor-${index + 1}`, { diameter: 1.8, segments: 10 }, scene);
+  anchorMesh.position = point.clone();
+  anchorMesh.material = anchorMaterial;
+  anchorMesh.isPickable = false;
+  anchors.push({ name: `COURSE ${index + 1}`, kind: "course", courseIndex: index, position: point.clone(), mesh: anchorMesh });
 }
 
 const giantRoot = new TransformNode("giant-root", scene);
@@ -227,7 +249,7 @@ marker.material = markerMaterial;
 marker.isPickable = false;
 marker.setEnabled(false);
 
-const spawnPosition = new Vector3(-87, 1.15, -87);
+const spawnPosition = new Vector3(0, 41.15, -86);
 const player = MeshBuilder.CreateBox("player", { width: 1.1, height: 2.3, depth: 0.9 }, scene);
 player.position = spawnPosition.clone();
 player.material = playerMaterial;
@@ -278,8 +300,13 @@ let attackCooldown = 0;
 let weakpointFlash = 0;
 let safePositionTimer = 0;
 let messageTimer = 0;
-let cameraYaw = 0.64;
-let cameraPitch = -0.16;
+let courseStage = 0;
+let courseStarted = false;
+let previousPhysicsZ = spawnPosition.z;
+let boostTimer = 0;
+let boostCooldown = 0;
+let cameraYaw = 0;
+let cameraPitch = 0.30;
 let manualCameraUntil = 0;
 let cameraPointerId: number | null = null;
 let cameraLastX = 0;
@@ -291,8 +318,9 @@ let boosting = false;
 const pressedKeys = new Set<string>();
 const playerHalfHeight = 1.15;
 const playerRadius = 0.56;
-const gravity = -26;
+const gravity = -18;
 const maxSpeed = 42;
+const flightState: FlightState = { position: [spawnPosition.x, spawnPosition.y, spawnPosition.z], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
 
 const approach = (current: number, target: number, maxDelta: number): number => {
   if (Math.abs(target - current) <= maxDelta) return target;
@@ -340,7 +368,14 @@ const getMovement = (): Vector3 => {
   return right.scale(x).add(forward.scale(y));
 };
 
-const isBoosting = (): boolean => boosting || pressedKeys.has("ShiftLeft") || pressedKeys.has("ShiftRight");
+const isBoosting = (): boolean => boostTimer > 0;
+
+const triggerBoost = (): void => {
+  if (boostCooldown > 0 || stageCleared) return;
+  boostTimer = 0.7;
+  boostCooldown = 1;
+  boosting = true;
+};
 
 const capVelocity = (): void => {
   const speed = velocity.length();
@@ -349,6 +384,7 @@ const capVelocity = (): void => {
 
 const detachWire = (announce: boolean): void => {
   if (!attachedAnchor) return;
+  releaseFlight(flightState);
   attachedAnchor = null;
   ropeLength = 0;
   if (wireMesh) {
@@ -359,19 +395,65 @@ const detachWire = (announce: boolean): void => {
   if (announce) showMessage("ワイヤー解除 / 勢いを維持", "good");
 };
 
+const segmentBlocked = (start: Vector3, end: Vector3, target?: Anchor): boolean => {
+  const delta = end.subtract(start);
+  for (const building of buildings) {
+    let tMin = 0;
+    let tMax = 1;
+    const axes: Array<[number, number, number]> = [
+      [start.x, delta.x, building.x],
+      [start.y, delta.y, building.top / 2],
+      [start.z, delta.z, building.z],
+    ];
+    const mins = [building.x - building.halfX, 0, building.z - building.halfZ];
+    const maxs = [building.x + building.halfX, building.top, building.z + building.halfZ];
+    for (let axis = 0; axis < 3; axis += 1) {
+      const origin = axes[axis][0];
+      const direction = axes[axis][1];
+      if (Math.abs(direction) < 0.0001) {
+        if (origin < mins[axis] || origin > maxs[axis]) { tMin = 2; break; }
+        continue;
+      }
+      const near = (mins[axis] - origin) / direction;
+      const far = (maxs[axis] - origin) / direction;
+      tMin = Math.max(tMin, Math.min(near, far));
+      tMax = Math.min(tMax, Math.max(near, far));
+      if (tMin > tMax) break;
+    }
+    if (tMin <= tMax && tMax >= 0.02 && tMin <= Math.max(0, 1 - 0.3 / Math.max(delta.length(), 0.3))) return true;
+  }
+  return false;
+};
+
 const findCandidate = (): void => {
-  const direction = viewDirection();
-  let best: { anchor: Anchor; distance: number; score: number } | null = null;
+  const forward = camera.getForwardRay(1).direction.normalize();
+  const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+  const up = Vector3.Cross(forward, right).normalize();
+  const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
+  const tanHalfFov = Math.tan(camera.fov / 2);
+  const candidates: Array<{ anchor: Anchor; distance: number; score: number }> = [];
   for (const anchor of anchors) {
+    if (anchor.kind === "course" && anchor.courseIndex !== courseStage) continue;
     const offset = anchor.position.subtract(playerPosition);
     const distance = offset.length();
+    const cameraOffset = anchor.position.subtract(camera.position).normalize();
     if (distance < 2.2 || distance > 98) continue;
     const toward = offset.scale(1 / distance);
-    const alignment = Vector3.Dot(toward, direction);
-    if (alignment < -0.34) continue;
-    const distanceScore = 1 - distance / 98;
-    const score = alignment * 2.1 + distanceScore * 0.8 + (anchor.kind === "giant" ? 0.035 : 0);
-    if (!best || score > best.score) best = { anchor, distance, score };
+    const forwardDot = Vector3.Dot(cameraOffset, forward);
+    if (forwardDot <= 0) continue;
+    const screenX = Vector3.Dot(cameraOffset, right) / Math.max(forwardDot, 0.25) / (tanHalfFov * aspect);
+    const screenY = Vector3.Dot(cameraOffset, up) / Math.max(forwardDot, 0.25) / tanHalfFov;
+    if (Math.abs(screenX) > 0.42 || Math.abs(screenY) > 0.42) continue;
+    if (segmentBlocked(camera.position, anchor.position, anchor) || segmentBlocked(playerPosition, anchor.position, anchor)) continue;
+    const courseBonus = anchor.kind === "course" ? -0.24 : 0;
+    candidates.push({ anchor, distance, score: Math.abs(screenX) + Math.abs(screenY) + distance * 0.002 + courseBonus });
+  }
+  candidates.sort((a, b) => a.score - b.score);
+  const best = candidates[0];
+  if (candidateAnchor && candidates.some((item) => item.anchor === candidateAnchor && item.score <= (best?.score ?? Infinity) + 0.08)) {
+    const current = candidates.find((item) => item.anchor === candidateAnchor)!;
+    candidateDistance = current.distance;
+    return;
   }
   candidateAnchor = best?.anchor ?? null;
   candidateDistance = best?.distance ?? 0;
@@ -383,17 +465,21 @@ const toggleWire = (): void => {
     detachWire(true);
     return;
   }
+  findCandidate();
   if (!candidateAnchor) {
     showMessage("接続できるアンカーがありません", "warn");
     return;
   }
   attachedAnchor = candidateAnchor;
-  ropeLength = clamp(candidateDistance, 12, 88);
-  const launchVelocity = wireLaunchVelocity(grounded, playerPosition.y, playerHalfHeight, candidateAnchor.position.y, velocity.y);
-  const towardAnchor = candidateAnchor.position.subtract(playerPosition).normalize();
-  velocity.y = launchVelocity;
-  velocity.addInPlace(towardAnchor.scale(2.2));
-  grounded = false;
+  flightState.position = [playerPosition.x, playerPosition.y, playerPosition.z];
+  flightState.velocity = [velocity.x, velocity.y, velocity.z];
+  flightState.grounded = grounded;
+  attachToAnchor(flightState, [candidateAnchor.position.x, candidateAnchor.position.y, candidateAnchor.position.z], [camera.getForwardRay(1).direction.x, 0, camera.getForwardRay(1).direction.z]);
+  playerPosition.copyFromFloats(...flightState.position);
+  velocity.copyFromFloats(...flightState.velocity);
+  ropeLength = flightState.ropeLength;
+  grounded = flightState.grounded;
+  if (candidateAnchor.kind === "course" && candidateAnchor.courseIndex === courseStage) courseStarted = true;
   playerMaterial.emissiveColor = hex("#1fa2ba");
   showMessage(`${candidateAnchor.name} に接続`, "good");
 };
@@ -422,7 +508,7 @@ const moveAndCollide = (dt: number): void => {
   for (const building of buildings) {
     const overlapX = building.halfX + playerRadius - Math.abs(next.x - building.x);
     const overlapZ = building.halfZ + playerRadius - Math.abs(next.z - building.z);
-    const crossesHeight = next.y - playerHalfHeight < building.top && next.y + playerHalfHeight > 0;
+    const crossesHeight = next.y - playerHalfHeight <= building.top + 0.05 && next.y + playerHalfHeight > 0;
     if (overlapX <= 0 || overlapZ <= 0 || !crossesHeight) continue;
 
     const wasAbove = playerPosition.y - playerHalfHeight >= building.top - 0.05;
@@ -450,16 +536,24 @@ const moveAndCollide = (dt: number): void => {
   playerPosition.copyFrom(next);
 };
 
-const resolveAttachedPenetration = (): void => {
+const resolveAttachedPenetration = (): boolean => {
+  let groundedOnSurface = false;
   if (playerPosition.y < playerHalfHeight) {
     playerPosition.y = playerHalfHeight;
     if (velocity.y < 0) velocity.y = 0;
+    groundedOnSurface = true;
   }
   for (const building of buildings) {
     const overlapX = building.halfX + playerRadius - Math.abs(playerPosition.x - building.x);
     const overlapZ = building.halfZ + playerRadius - Math.abs(playerPosition.z - building.z);
     const crossesHeight = playerPosition.y - playerHalfHeight < building.top && playerPosition.y + playerHalfHeight > 0;
     if (overlapX <= 0 || overlapZ <= 0 || !crossesHeight || playerPosition.y >= building.top + playerHalfHeight) continue;
+    if (playerPosition.y >= building.top + playerHalfHeight - 0.35 && velocity.y <= 0) {
+      playerPosition.y = building.top + playerHalfHeight;
+      velocity.y = 0;
+      groundedOnSurface = true;
+      continue;
+    }
     if (overlapX < overlapZ) {
       const side = Math.sign(playerPosition.x - building.x) || 1;
       playerPosition.x = building.x + side * (building.halfX + playerRadius);
@@ -470,6 +564,7 @@ const resolveAttachedPenetration = (): void => {
       if (velocity.z * side < 0) velocity.z = 0;
     }
   }
+  return groundedOnSurface;
 };
 
 const respawn = (): void => {
@@ -529,42 +624,68 @@ const resetStage = (): void => {
   coinsCollected = progress.collectedCount;
   giantHp = progress.giantHp;
   attackCooldown = progress.attackCooldown;
+  courseStage = 0;
+  courseStarted = false;
+  boostTimer = 0;
+  boostCooldown = 0;
   weakpointFlash = 0;
   stageCleared = false;
-  cameraYaw = 0.64;
-  cameraPitch = -0.16;
+  cameraYaw = 0;
+  cameraPitch = 0.30;
+  camera.position.copyFrom(spawnPosition.add(new Vector3(0, 2.05, 0)).subtract(viewDirection().scale(10.2)));
+  camera.setTarget(spawnPosition.add(new Vector3(0, 2.05, 0)));
   clearScreen.classList.add("is-hidden");
   for (const coin of coins) {
     coin.collected = false;
     coin.mesh.setEnabled(true);
     coin.mesh.scaling.setAll(1);
   }
-  showMessage("Stage 1 へようこそ。アンカーを狙ってワイヤー", "normal");
+  showMessage("狙ってWIRE → 飛ぶ → RELEASE", "normal");
 };
 
 const updateHud = (): void => {
   coinCount.textContent = `コイン ${coinsCollected} / 12`;
   giantHpReadout.textContent = `巨人 HP ${giantHp} / 3`;
-  if (giantHp <= 0 && coinsCollected >= 8) objective.textContent = "目標達成。STAGE CLEAR";
+  const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
+  if (courseStage < 3) objective.textContent = creditedAnchor ? "解除して次のアンカーへ" : "3つのアンカーをつないで飛ぼう";
+  else if (giantHp <= 0 && coinsCollected >= 8) objective.textContent = "目標達成。STAGE CLEAR";
   else if (giantHp <= 0) objective.textContent = `あと${Math.max(0, 8 - coinsCollected)}枚のコインを集めよう`;
   else if (coinsCollected >= 8) objective.textContent = "巨人の弱点へ近づいて攻撃しよう";
   else objective.textContent = `コインを8枚集めて、巨人を倒せ（${coinsCollected} / 8）`;
 
-  const nextCoin = coins.find((coin) => !coin.collected);
-  const target = giantHp > 0 && coinsCollected >= 8 ? weakpoint.position : nextCoin?.mesh.position;
-  if (target) {
+  const courseLabel = courseStage < 3 ? `OPENING ${courseStage} / 3` : "OPENING COMPLETE";
+  if (courseStage < 3) {
+    const nextCourse = courseAnchorPositions[courseStage];
+    const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
+    if (creditedAnchor) {
+      routeReadout.textContent = `${courseLabel}　解除して次へ　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+    } else {
+      const offset = nextCourse.subtract(playerPosition);
+      const distance = offset.length();
+      const targetDirection = offset.clone().normalize();
+      const forward = new Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
+      const right = new Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
+      const forwardDot = Vector3.Dot(targetDirection, forward);
+      const heading = forwardDot > 0.72 ? "正面" : (forwardDot < -0.2 ? "背後" : (Vector3.Dot(targetDirection, right) >= 0 ? "右" : "左"));
+      const vertical = offset.y > 3 ? "上" : (offset.y < -3 ? "下" : "同高度");
+      routeReadout.textContent = `${courseLabel}　次のアンカー${courseStage + 1}：${Math.round(distance)}m / ${heading}・${vertical}　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+    }
+  } else {
+    const nextCoin = coins.find((coin) => !coin.collected);
+    const target = giantHp > 0 && coinsCollected >= 8 ? weakpoint.position : nextCoin?.mesh.position;
+    if (target) {
     const offset = target.subtract(playerPosition);
     const horizontalDistance = Math.hypot(offset.x, offset.z);
-    const targetDirection = offset.normalize();
+    const targetDirection = offset.clone().normalize();
     const forward = new Vector3(Math.sin(cameraYaw), 0, Math.cos(cameraYaw));
     const right = new Vector3(Math.cos(cameraYaw), 0, -Math.sin(cameraYaw));
     const forwardDot = Vector3.Dot(targetDirection, forward);
     const heading = forwardDot > 0.72 ? "正面" : (forwardDot < -0.2 ? "背後" : (Vector3.Dot(targetDirection, right) >= 0 ? "右" : "左"));
-    routeReadout.textContent = giantHp > 0 && coinsCollected >= 8
-      ? `巨人の弱点：${Math.round(horizontalDistance)}m / ${heading}`
-      : `次のコイン：${Math.round(horizontalDistance)}m / ${heading}`;
-  } else {
-    routeReadout.textContent = "目標ルート完了";
+    const targetLabel = giantHp > 0 && coinsCollected >= 8 ? `巨人の弱点：${Math.round(horizontalDistance)}m / ${heading}` : `次のコイン：${Math.round(horizontalDistance)}m / ${heading}`;
+      routeReadout.textContent = `${courseLabel}　${targetLabel}　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+    } else {
+      routeReadout.textContent = `${courseLabel}　目標ルート完了　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+    }
   }
 
   if (attachedAnchor) {
@@ -580,14 +701,10 @@ const updateHud = (): void => {
 };
 
 const updateCamera = (dt: number, now: number): void => {
-  const speed = velocity.length();
-  if (now > manualCameraUntil && speed > 2.5) {
-    const desiredYaw = Math.atan2(velocity.x, velocity.z);
-    cameraYaw = angleApproach(cameraYaw, desiredYaw, 1 - Math.exp(-dt * 1.5));
-  }
   const forward = viewDirection();
   const focus = playerPosition.add(new Vector3(0, 2.05, 0));
-  const wantedPosition = focus.subtract(forward.scale(10.2));
+  let wantedPosition = focus.subtract(forward.scale(10.2));
+  if (segmentBlocked(focus, wantedPosition)) wantedPosition = focus.subtract(forward.scale(5.8));
   camera.position = Vector3.Lerp(camera.position, wantedPosition, clamp(dt * 7.5, 0, 1));
   camera.setTarget(focus);
 };
@@ -605,39 +722,23 @@ const updateCandidateMarker = (dt: number): void => {
   marker.scaling.setAll(attachedAnchor ? 1.18 : 1);
 };
 
-const updatePhysics = (dt: number): void => {
+const updatePhysicsStep = (dt: number): void => {
+  boostTimer = Math.max(0, boostTimer - dt);
+  boostCooldown = Math.max(0, boostCooldown - dt);
+  if (boostTimer <= 0) boosting = false;
+  if (attachedAnchor && segmentBlocked(playerPosition, attachedAnchor.position, attachedAnchor)) detachWire(true);
   const movement = getMovement();
   if (attachedAnchor) {
-    const anchorPosition = attachedAnchor.position;
-    const offset = playerPosition.subtract(anchorPosition);
-    const distance = Math.max(offset.length(), 0.001);
-    const radial = offset.scale(1 / distance);
-    velocity.y += gravity * dt;
-
-    if (movement.lengthSquared() > 0.001) {
-      const tangent = movement.subtract(radial.scale(Vector3.Dot(movement, radial)));
-      if (tangent.lengthSquared() > 0.001) velocity.addInPlace(tangent.normalize().scale(28 * dt));
-    } else {
-      const tangentVelocity = velocity.subtract(radial.scale(Vector3.Dot(velocity, radial)));
-      if (tangentVelocity.lengthSquared() > 0.001) velocity.addInPlace(tangentVelocity.normalize().scale(4 * dt));
-    }
-
-    if (isBoosting()) velocity.addInPlace(viewDirection().scale(34 * dt));
-    capVelocity();
-    const next = playerPosition.add(velocity.scale(dt));
-    const nextOffset = next.subtract(anchorPosition);
-    const nextDistance = nextOffset.length();
-    if (nextDistance > ropeLength) {
-      const corrected = anchorPosition.add(nextOffset.scale(ropeLength / Math.max(nextDistance, 0.001)));
-      const correctedRadial = corrected.subtract(anchorPosition).normalize();
-      const outwardSpeed = Vector3.Dot(velocity, correctedRadial);
-      if (outwardSpeed > 0) velocity.subtractInPlace(correctedRadial.scale(outwardSpeed * 1.25));
-      playerPosition.copyFrom(corrected);
-    } else {
-      playerPosition.copyFrom(next);
-    }
-    resolveAttachedPenetration();
-    grounded = playerPosition.y <= playerHalfHeight + 0.01;
+    flightState.position = [playerPosition.x, playerPosition.y, playerPosition.z];
+    flightState.velocity = [velocity.x, velocity.y, velocity.z];
+    flightState.grounded = grounded;
+    flightState.ropeLength = ropeLength;
+    const boostForward = camera.getForwardRay(1).direction;
+    stepAttached(flightState, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z], [movement.x, movement.y, movement.z], dt, isBoosting(), playerHalfHeight, [boostForward.x, Math.max(0, boostForward.y), boostForward.z]);
+    playerPosition.copyFromFloats(...flightState.position);
+    velocity.copyFromFloats(...flightState.velocity);
+    ropeLength = flightState.ropeLength;
+    grounded = resolveAttachedPenetration() || flightState.grounded;
   } else {
     if (grounded) {
       const desiredX = movement.x * (isBoosting() ? 18 : 13);
@@ -649,11 +750,17 @@ const updatePhysics = (dt: number): void => {
         velocity.z = approach(velocity.z, 0, 22 * dt);
       }
     } else {
-      [velocity.x, velocity.z] = airMomentumStep(velocity.x, velocity.z, movement.x, movement.z, dt, isBoosting());
+      const detachedState: FlightState = {
+        position: [playerPosition.x, playerPosition.y, playerPosition.z],
+        velocity: [velocity.x, velocity.y, velocity.z],
+        grounded: false,
+        attached: false,
+        ropeLength: 0,
+      };
+      const forward = viewDirection();
+      stepDetached(detachedState, [movement.x, 0, movement.z], dt, isBoosting(), [forward.x, Math.max(0, forward.y), forward.z], gravity, maxSpeed, false);
+      velocity.copyFromFloats(...detachedState.velocity);
     }
-    velocity.y += gravity * dt;
-    if (isBoosting()) velocity.addInPlace(viewDirection().scale(26 * dt));
-    capVelocity();
     moveAndCollide(dt);
   }
 
@@ -663,6 +770,29 @@ const updatePhysics = (dt: number): void => {
   playerMaterial.emissiveColor = attachedAnchor ? hex("#1fa2ba") : (isBoosting() ? hex("#1c7d9a") : hex("#0b4658"));
   const speed = velocity.length();
   speedLines.classList.toggle("active", speed > 15 || isBoosting());
+};
+
+const updatePhysics = (dt: number): void => {
+  const bounded = Math.max(0, dt);
+  previousPhysicsZ = playerPosition.z;
+  const steps = Math.max(1, Math.ceil(bounded / (1 / 120)));
+  const step = bounded / steps;
+  for (let index = 0; index < steps; index += 1) updatePhysicsStep(step);
+};
+
+const updateOpeningCourse = (): void => {
+  if (attachedAnchor?.kind === "course" && attachedAnchor.courseIndex === courseStage) {
+    if (!grounded && crossedCourseAnchor(previousPhysicsZ, playerPosition.z, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z], playerPosition.x)) {
+      courseStage += 1;
+      courseStarted = true;
+      showMessage(courseStage < 3 ? `区間クリア ${courseStage} / 3　次のアンカーへ` : "OPENING COMPLETE　次はコインと巨人", "good");
+    }
+  }
+  if (courseStarted && grounded && courseStage < 3) {
+    courseStarted = false;
+    courseStage = 0;
+    showMessage("着地したためコースをリセット", "warn");
+  }
 };
 
 const updateWorld = (dt: number): void => {
@@ -679,6 +809,7 @@ const updateWorld = (dt: number): void => {
   attackCooldown = progress.attackCooldown;
   collectCoins();
   findCandidate();
+  updateOpeningCourse();
   updateCandidateMarker(dt);
   updateWire();
   safePositionTimer += dt;
@@ -741,20 +872,10 @@ boostButton.addEventListener("pointerdown", (event: Event) => {
   const pointer = event as PointerEvent;
   pointer.preventDefault();
   pointer.stopPropagation();
-  boostPointerId = pointer.pointerId;
-  boosting = true;
+  triggerBoost();
   boostButton.classList.add("active");
-  boostButton.setPointerCapture(pointer.pointerId);
+  window.setTimeout(() => boostButton.classList.remove("active"), 120);
 });
-const endBoost = (event: Event): void => {
-  const pointer = event as PointerEvent;
-  if (pointer.pointerId !== boostPointerId) return;
-  boostPointerId = null;
-  boosting = false;
-  boostButton.classList.remove("active");
-};
-boostButton.addEventListener("pointerup", endBoost);
-boostButton.addEventListener("pointercancel", endBoost);
 
 attackButton.addEventListener("pointerdown", (event: Event) => {
   const pointer = event as PointerEvent;
@@ -792,7 +913,7 @@ canvas.addEventListener("pointermove", (event: PointerEvent) => {
   cameraLastX = event.clientX;
   cameraLastY = event.clientY;
   cameraYaw += dx * 0.006;
-  cameraPitch = clamp(cameraPitch - dy * 0.004, -0.8, 0.45);
+  cameraPitch = clamp(cameraPitch - dy * 0.004, -0.8, 0.9);
   manualCameraUntil = performance.now() + 1600;
 });
 const endCamera = (event: PointerEvent): void => {
@@ -807,6 +928,7 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
   if (event.code === "Space") toggleWire();
+  if (event.code === "ShiftLeft" || event.code === "ShiftRight") triggerBoost();
   if (event.code === "KeyE") attack();
   if (event.code === "KeyR") resetStage();
 });
@@ -818,6 +940,8 @@ const resetPointersAndKeys = (): void => {
   cameraPointerId = null;
   boostPointerId = null;
   boosting = false;
+  boostTimer = 0;
+  boostCooldown = 0;
   boostButton.classList.remove("active");
   resetStick();
 };
@@ -830,7 +954,7 @@ resetStage();
 let previousTime = performance.now();
 engine.runRenderLoop(() => {
   const now = performance.now();
-  const dt = clamp((now - previousTime) / 1000, 0, 0.033);
+  const dt = clamp((now - previousTime) / 1000, 0, 0.1);
   previousTime = now;
   if (!stageCleared) updatePhysics(dt);
   updateCamera(dt, now);

@@ -7,7 +7,8 @@
     "dev": "vite --host 0.0.0.0 --port 4173",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview --host 0.0.0.0 --port 4173",
-    "verify:gameplay": "node scripts/verify-gameplay.mjs"
+    "verify:gameplay": "node scripts/verify-gameplay.mjs",
+    "verify:flight": "node scripts/verify-flight.mjs"
   },
   "dependencies": {
     "@babylonjs/core": "7.42.0"

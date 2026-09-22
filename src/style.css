@@ -97,3 +97,10 @@ button { font: inherit; color: inherit; }
   .touch-actions { gap: 5px; }
   .action-button { padding: 5px; }
 }
+
+@media (orientation: landscape) and (max-height: 460px), (pointer: coarse) and (orientation: landscape) {
+  .desktop-help { display: none; }
+  .objective-card { margin-top: 8px; padding: 8px 12px 9px; }
+  .quick-retry { width: 30px; height: 30px; font-size: 17px; }
+  .message { top: auto; bottom: max(calc(env(safe-area-inset-bottom) + 10px), 10px); transform: translateX(-50%); font-size: 11px; max-width: calc(100vw - 320px); white-space: normal; text-align: center; line-height: 1.25; }
+}
