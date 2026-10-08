@@ -8,6 +8,7 @@ import {
   Mesh,
   MeshBuilder,
   Scene,
+  SceneInstrumentation,
   StandardMaterial,
   TransformNode,
   UniversalCamera,
@@ -15,6 +16,7 @@ import {
 } from "@babylonjs/core";
 import { collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
 import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
+import { COMIC, createComicArt } from "./comic-art";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -68,15 +70,21 @@ const clearCoins = select<HTMLElement>("#clear-coins");
 const retryButton = select<HTMLButtonElement>("#retry-button");
 const quickRetryButton = select<HTMLButtonElement>("#quick-retry");
 
+const speedReadout = select<HTMLElement>("#speed-readout");
+const speedFill = select<HTMLElement>("#speed-fill");
+
 const engine = new Engine(canvas, true, {
   antialias: true,
   preserveDrawingBuffer: false,
   stencil: true,
 });
-engine.setHardwareScalingLevel(Math.min(1.35, Math.max(1, window.devicePixelRatio * 0.78)));
+// Render at up to 1.5 pixels per CSS pixel; keep mobile edges crisp without full DPR cost.
+engine.setHardwareScalingLevel(1 / Math.min(1.5, window.devicePixelRatio || 1));
 
 const scene = new Scene(engine);
-scene.clearColor = new Color4(0.035, 0.11, 0.19, 1);
+const instrumentation = import.meta.env.DEV ? new SceneInstrumentation(scene) : null;
+scene.clearColor = Color4.FromHexString("#a7d9ecff");
+const art = createComicArt(scene);
 
 const camera = new UniversalCamera("follow-camera", new Vector3(-84, 8, -98), scene);
 camera.minZ = 0.2;
@@ -85,13 +93,13 @@ camera.fov = 0.9;
 camera.inputs.clear();
 
 const hemi = new HemisphericLight("soft-sky-light", new Vector3(0, 1, 0), scene);
-hemi.intensity = 0.92;
-hemi.diffuse = new Color3(0.73, 0.88, 1);
-hemi.groundColor = new Color3(0.08, 0.12, 0.2);
+hemi.intensity = 0.55;
+hemi.diffuse = new Color3(1, .97, .9);
+hemi.groundColor = new Color3(.28, .40, .62);
 
 const sun = new DirectionalLight("city-sun", new Vector3(-0.35, -1, 0.42), scene);
 sun.position = new Vector3(-80, 150, -100);
-sun.intensity = 0.62;
+sun.intensity = 0.48;
 
 const hex = (value: string): Color3 => Color3.FromHexString(value);
 
@@ -99,26 +107,22 @@ const material = (name: string, diffuse: string, emissive = "#000000"): Standard
   const result = new StandardMaterial(name, scene);
   result.diffuseColor = hex(diffuse);
   result.emissiveColor = hex(emissive);
-  result.specularColor = new Color3(0.12, 0.16, 0.22);
+  result.specularColor = Color3.Black();
   return result;
 };
 
-const groundMaterial = material("ground-material", "#13253b", "#071523");
-const roadMaterial = material("road-material", "#0a1728", "#07111c");
-const roofMaterial = material("roof-material", "#1c3b55", "#092131");
-const playerMaterial = material("player-material", "#55d8e8", "#0b4658");
-const playerAccentMaterial = material("player-accent", "#f4fbff", "#276d7e");
-const anchorMaterial = material("anchor-material", "#54ecff", "#1599b4");
-const anchorGiantMaterial = material("giant-anchor-material", "#ffbd55", "#91450e");
-const coinMaterial = material("coin-material", "#ffd45a", "#b9630d");
-const giantMaterial = material("giant-material", "#6e3e63", "#250e31");
-const giantLightMaterial = material("giant-light-material", "#be6f76", "#4e1e37");
-const weakpointMaterial = material("weakpoint-material", "#ff5c6a", "#ba1529");
-const markerMaterial = material("target-marker-material", "#a4f7ff", "#2cc4db");
-const markerGiantMaterial = material("target-giant-marker-material", "#ffd16e", "#ba6812");
+const groundMaterial = material("ground-material", "#b6c9c8");
+const roadMaterial = material("road-material", "#557b97");
+const roofMaterial = material("roof-material", COMIC.cream);
+const anchorMaterial = material("anchor-material", COMIC.yellow, "#6a5010");
+const anchorGiantMaterial = anchorMaterial;
+const coinMaterial = material("coin-material", COMIC.yellow, "#55420e");
+const weakpointMaterial = material("weakpoint-material", COMIC.yellow, "#6a5010");
+const markerMaterial = material("target-marker-material", COMIC.cream, "#756e5d");
+const markerGiantMaterial = markerMaterial;
 
 const skybox = MeshBuilder.CreateBox("skybox", { size: 500 }, scene);
-const skyMaterial = material("sky-material", "#0b2841", "#0b2841");
+const skyMaterial = material("sky-material", COMIC.sky, COMIC.sky);
 skyMaterial.disableLighting = true;
 skyMaterial.backFaceCulling = false;
 skybox.material = skyMaterial;
@@ -139,7 +143,7 @@ roadB.material = roadMaterial;
 
 const buildings: Building[] = [];
 const anchors: Anchor[] = [];
-const buildingPalette = ["#294965", "#325a74", "#3c516c", "#26546d", "#46556d"];
+const buildingPalette = [COMIC.cream, "#83aec6", "#4c7ebb", COMIC.blue, "#edb9a1"];
 const buildingLayouts: Array<[number, number, number, number, number]> = [
   [-62, -72, 9, 8, 14], [-38, -72, 10, 8, 21], [38, -72, 10, 8, 17], [62, -72, 9, 8, 25],
   [-70, -40, 12, 9, 18], [-42, -40, 9, 11, 27], [42, -40, 12, 10, 21], [70, -40, 10, 8, 13],
@@ -156,7 +160,7 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
     depth: halfZ * 2,
   }, scene);
   building.position = new Vector3(x, height / 2, z);
-  building.material = material(`building-mat-${index + 1}`, buildingPalette[index % buildingPalette.length], "#091726");
+  building.material = material(`building-mat-${index + 1}`, buildingPalette[index % buildingPalette.length]);
 
   const roof = MeshBuilder.CreateBox(`roof-${index + 1}`, {
     width: halfX * 2 + 0.45,
@@ -177,7 +181,7 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
 
 const openingRoof = MeshBuilder.CreateBox("opening-roof", { width: 44, height: 40, depth: 16 }, scene);
 openingRoof.position = new Vector3(0, 20, -88);
-openingRoof.material = roofMaterial;
+openingRoof.material = material("launch-roof", COMIC.blue);
 buildings.push({ mesh: openingRoof, x: 0, z: -88, halfX: 22, halfZ: 8, top: 40 });
 
 const courseAnchorPositions = COURSE_ANCHORS.map(([x, y, z]) => new Vector3(x, y, z));
@@ -186,7 +190,7 @@ for (let index = 0; index < courseAnchorPositions.length; index += 1) {
   const supportX = point.x >= 0 ? 26 : -26;
   const support = MeshBuilder.CreateBox(`course-support-${index + 1}`, { width: 4, height: point.y - 2, depth: 6 }, scene);
   support.position = new Vector3(supportX, (point.y - 2) / 2, point.z);
-  support.material = material(`course-support-material-${index + 1}`, index % 2 === 0 ? "#1d5874" : "#254c6d", "#082536");
+  support.material = material(`course-support-material-${index + 1}`, COMIC.blue);
   buildings.push({ mesh: support, x: supportX, z: point.z, halfX: 2, halfZ: 3, top: point.y - 2 });
   const anchorMesh = MeshBuilder.CreateSphere(`course-anchor-${index + 1}`, { diameter: 1.8, segments: 10 }, scene);
   anchorMesh.position = point.clone();
@@ -198,27 +202,14 @@ for (let index = 0; index < courseAnchorPositions.length; index += 1) {
 const giantRoot = new TransformNode("giant-root", scene);
 giantRoot.position = new Vector3(15, 0, 48);
 
-const giantPart = (name: string, dimensions: { width: number; height: number; depth: number }, position: Vector3, partMaterial = giantMaterial): Mesh => {
-  const part = MeshBuilder.CreateBox(name, dimensions, scene);
-  part.position = giantRoot.position.add(position);
-  part.material = partMaterial;
-  return part;
-};
-
-const giantBody = giantPart("giant-body", { width: 9, height: 18, depth: 5 }, new Vector3(0, 10, 0));
-const giantChest = giantPart("giant-chest-plate", { width: 6.2, height: 8, depth: 0.55 }, new Vector3(0, 12, -2.74), giantLightMaterial);
-const giantHead = MeshBuilder.CreateSphere("giant-head", { diameter: 6.5, segments: 12 }, scene);
-giantHead.position = giantRoot.position.add(new Vector3(0, 22, 0));
-giantHead.material = giantMaterial;
-const giantEye = MeshBuilder.CreateBox("giant-eye-strip", { width: 3.4, height: 0.45, depth: 0.25 }, scene);
-giantEye.position = giantRoot.position.add(new Vector3(0, 22.2, -2.95));
-giantEye.material = weakpointMaterial;
-const leftArm = giantPart("giant-left-arm", { width: 3, height: 14, depth: 3 }, new Vector3(-7, 10, 0), giantLightMaterial);
-leftArm.rotation.z = -0.08;
-const rightArm = giantPart("giant-right-arm", { width: 3, height: 14, depth: 3 }, new Vector3(7, 10, 0), giantLightMaterial);
-rightArm.rotation.z = 0.08;
-giantPart("giant-left-leg", { width: 3.4, height: 9, depth: 3.6 }, new Vector3(-2.6, 1, 0));
-giantPart("giant-right-leg", { width: 3.4, height: 9, depth: 3.6 }, new Vector3(2.6, 1, 0));
+const animateGiant = art.createGiant(giantRoot);
+art.decorateCity(buildingLayouts);
+art.bake();
+// These are only render meshes. Collision uses the original immutable lot dimensions.
+const staticLots = buildings.map(({ mesh }) => mesh);
+Mesh.MergeMeshes(staticLots, true, true, undefined, false, true);
+const staticRoofs = scene.meshes.filter(mesh => /^roof-\d+$/.test(mesh.name)) as Mesh[];
+Mesh.MergeMeshes(staticRoofs, true, true);
 
 const weakpoint = MeshBuilder.CreateSphere("giant-weakpoint", { diameter: 2.15, segments: 12 }, scene);
 weakpoint.position = giantRoot.position.add(new Vector3(0, 14, -3.45));
@@ -250,15 +241,9 @@ marker.isPickable = false;
 marker.setEnabled(false);
 
 const spawnPosition = new Vector3(0, 41.15, -86);
-const player = MeshBuilder.CreateBox("player", { width: 1.1, height: 2.3, depth: 0.9 }, scene);
+const player = new TransformNode("player", scene);
 player.position = spawnPosition.clone();
-player.material = playerMaterial;
-player.isPickable = false;
-const playerVisor = MeshBuilder.CreateBox("player-visor", { width: 0.72, height: 0.33, depth: 0.12 }, scene);
-playerVisor.parent = player;
-playerVisor.position = new Vector3(0, 0.35, 0.47);
-playerVisor.material = playerAccentMaterial;
-playerVisor.isPickable = false;
+const animateHero = art.createHero(player);
 
 const coinPositions: Vector3[] = [
   new Vector3(-77, 15, -72), new Vector3(-58, 20, -58), new Vector3(-39, 26, -47), new Vector3(-20, 20, -37),
@@ -272,6 +257,10 @@ for (let index = 0; index < coinPositions.length; index += 1) {
   coin.rotation.x = Math.PI / 2;
   coin.material = coinMaterial;
   coin.isPickable = false;
+  const stamp = MeshBuilder.CreateCylinder(`coin-stamp-${index + 1}`, { diameter: 1.15, height: .16, tessellation: 6 }, scene);
+  stamp.parent = coin;
+  stamp.material = coinMaterial;
+  stamp.isPickable = false;
   coins.push({ mesh: coin, collected: false });
 }
 const progress = createProgressState(coins.length, 3);
@@ -306,7 +295,7 @@ let previousPhysicsZ = spawnPosition.z;
 let boostTimer = 0;
 let boostCooldown = 0;
 let cameraYaw = 0;
-let cameraPitch = 0.30;
+let cameraPitch = -0.12;
 let manualCameraUntil = 0;
 let cameraPointerId: number | null = null;
 let cameraLastX = 0;
@@ -391,7 +380,6 @@ const detachWire = (announce: boolean): void => {
     wireMesh.dispose();
     wireMesh = null;
   }
-  playerMaterial.emissiveColor = hex("#0b4658");
   if (announce) showMessage("ワイヤー解除 / 勢いを維持", "good");
 };
 
@@ -443,9 +431,11 @@ const findCandidate = (): void => {
     if (forwardDot <= 0) continue;
     const screenX = Vector3.Dot(cameraOffset, right) / Math.max(forwardDot, 0.25) / (tanHalfFov * aspect);
     const screenY = Vector3.Dot(cameraOffset, up) / Math.max(forwardDot, 0.25) / tanHalfFov;
-    if (Math.abs(screenX) > 0.42 || Math.abs(screenY) > 0.42) continue;
+    // Opening hooks sit overhead; keep them selectable with the city-facing camera.
+    const verticalAimWindow = anchor.kind === "course" ? .85 : .42;
+    if (Math.abs(screenX) > .42 || Math.abs(screenY) > verticalAimWindow) continue;
     if (segmentBlocked(camera.position, anchor.position, anchor) || segmentBlocked(playerPosition, anchor.position, anchor)) continue;
-    const courseBonus = anchor.kind === "course" ? -0.24 : 0;
+    const courseBonus = anchor.kind === "course" ? -1.2 : 0;
     candidates.push({ anchor, distance, score: Math.abs(screenX) + Math.abs(screenY) + distance * 0.002 + courseBonus });
   }
   candidates.sort((a, b) => a.score - b.score);
@@ -480,7 +470,6 @@ const toggleWire = (): void => {
   ropeLength = flightState.ropeLength;
   grounded = flightState.grounded;
   if (candidateAnchor.kind === "course" && candidateAnchor.courseIndex === courseStage) courseStarted = true;
-  playerMaterial.emissiveColor = hex("#1fa2ba");
   showMessage(`${candidateAnchor.name} に接続`, "good");
 };
 
@@ -489,7 +478,7 @@ const updateWire = (): void => {
   const points = [playerPosition.clone(), attachedAnchor.position.clone()];
   if (!wireMesh) {
     wireMesh = MeshBuilder.CreateLines("active-wire", { points, updatable: true }, scene);
-    wireMesh.color = new Color3(0.42, 0.94, 1);
+    wireMesh.color = Color3.FromHexString(COMIC.ink);
   } else {
     MeshBuilder.CreateLines("active-wire", { points, instance: wireMesh });
   }
@@ -581,6 +570,7 @@ const collectCoins = (): void => {
     if (coin.collected) continue;
     if (Vector3.Distance(playerPosition, coin.mesh.position) > 5.2) continue;
     if (!collectCoin(progress, index)) continue;
+    art.burst(coin.mesh.position);
     coin.collected = true;
     coin.mesh.setEnabled(false);
     coinsCollected = progress.collectedCount;
@@ -609,11 +599,13 @@ const attack = (): void => {
     return;
   }
   weakpointFlash = 0.3;
+  art.burst(weakpoint.position);
   showMessage(`弱点ヒット　残りHP ${giantHp}`, "good");
   if (giantHp <= 0) showMessage("巨人撃破。コインを8枚集めよう", "good");
 };
 
 const resetStage = (): void => {
+  art.resetEffects();
   detachWire(false);
   resetPointersAndKeys();
   playerPosition.copyFrom(spawnPosition);
@@ -631,8 +623,8 @@ const resetStage = (): void => {
   weakpointFlash = 0;
   stageCleared = false;
   cameraYaw = 0;
-  cameraPitch = 0.30;
-  camera.position.copyFrom(spawnPosition.add(new Vector3(0, 2.05, 0)).subtract(viewDirection().scale(10.2)));
+  cameraPitch = -0.12;
+  camera.position.copyFrom(spawnPosition.add(new Vector3(0, 2.05, 0)).subtract(viewDirection().scale(14)));
   camera.setTarget(spawnPosition.add(new Vector3(0, 2.05, 0)));
   clearScreen.classList.add("is-hidden");
   for (const coin of coins) {
@@ -644,8 +636,13 @@ const resetStage = (): void => {
 };
 
 const updateHud = (): void => {
-  coinCount.textContent = `コイン ${coinsCollected} / 12`;
-  giantHpReadout.textContent = `巨人 HP ${giantHp} / 3`;
+  coinCount.textContent = `COIN ${String(coinsCollected).padStart(2, "0")} / 12`;
+  speedReadout.textContent = String(Math.round(velocity.length()));
+  speedFill.style.width = `${Math.min(100, velocity.length() / maxSpeed * 100)}%`;
+  wireButton.setAttribute("aria-pressed", String(!!attachedAnchor));
+  giantHpReadout.textContent = `GIANT ${"◆".repeat(giantHp)}${"◇".repeat(3 - giantHp)}`;
+  giantHpReadout.setAttribute("aria-label", `巨人 HP ${giantHp} / 3`);
+  select<HTMLElement>(".eyebrow").textContent = courseStage < 3 ? "FLIGHT CHECK / はじめの飛行" : "MISSION / コイン回収・巨人撃破";
   const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
   if (courseStage < 3) objective.textContent = creditedAnchor ? "解除して次のアンカーへ" : "3つのアンカーをつないで飛ぼう";
   else if (giantHp <= 0 && coinsCollected >= 8) objective.textContent = "目標達成。STAGE CLEAR";
@@ -653,12 +650,11 @@ const updateHud = (): void => {
   else if (coinsCollected >= 8) objective.textContent = "巨人の弱点へ近づいて攻撃しよう";
   else objective.textContent = `コインを8枚集めて、巨人を倒せ（${coinsCollected} / 8）`;
 
-  const courseLabel = courseStage < 3 ? `OPENING ${courseStage} / 3` : "OPENING COMPLETE";
   if (courseStage < 3) {
     const nextCourse = courseAnchorPositions[courseStage];
     const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
     if (creditedAnchor) {
-      routeReadout.textContent = `${courseLabel}　解除して次へ　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+      routeReadout.textContent = `${courseStage} / 3　RELEASE → 次のアンカー`;
     } else {
       const offset = nextCourse.subtract(playerPosition);
       const distance = offset.length();
@@ -668,7 +664,7 @@ const updateHud = (): void => {
       const forwardDot = Vector3.Dot(targetDirection, forward);
       const heading = forwardDot > 0.72 ? "正面" : (forwardDot < -0.2 ? "背後" : (Vector3.Dot(targetDirection, right) >= 0 ? "右" : "左"));
       const vertical = offset.y > 3 ? "上" : (offset.y < -3 ? "下" : "同高度");
-      routeReadout.textContent = `${courseLabel}　次のアンカー${courseStage + 1}：${Math.round(distance)}m / ${heading}・${vertical}　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+      routeReadout.textContent = `${courseStage} / 3　次のフック ${Math.round(distance)}m・${heading} / ${vertical}`;
     }
   } else {
     const nextCoin = coins.find((coin) => !coin.collected);
@@ -682,20 +678,20 @@ const updateHud = (): void => {
     const forwardDot = Vector3.Dot(targetDirection, forward);
     const heading = forwardDot > 0.72 ? "正面" : (forwardDot < -0.2 ? "背後" : (Vector3.Dot(targetDirection, right) >= 0 ? "右" : "左"));
     const targetLabel = giantHp > 0 && coinsCollected >= 8 ? `巨人の弱点：${Math.round(horizontalDistance)}m / ${heading}` : `次のコイン：${Math.round(horizontalDistance)}m / ${heading}`;
-      routeReadout.textContent = `${courseLabel}　${targetLabel}　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+      routeReadout.textContent = targetLabel;
     } else {
-      routeReadout.textContent = `${courseLabel}　目標ルート完了　｜ ${Math.round(velocity.length())}m/s / 高度${Math.round(playerPosition.y)}m`;
+      routeReadout.textContent = "目標ルート完了";
     }
   }
 
   if (attachedAnchor) {
-    anchorReadout.textContent = `接続中：${attachedAnchor.name}　${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m　｜ タップで解除`;
+    anchorReadout.textContent = `● ${attachedAnchor.name} / ${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m`;
     wireLabel.textContent = "RELEASE";
   } else if (candidateAnchor) {
-    anchorReadout.textContent = `照準：${candidateAnchor.name}　${Math.round(candidateDistance)}m　｜ WIREで接続`;
+    anchorReadout.textContent = `◎ ${candidateAnchor.name} / ${Math.round(candidateDistance)}m`;
     wireLabel.textContent = "WIRE";
   } else {
-    anchorReadout.textContent = "照準アンカーなし　視線を建物へ向けてください";
+    anchorReadout.textContent = "建物のフックに照準を合わせよう";
     wireLabel.textContent = "WIRE";
   }
 };
@@ -703,7 +699,7 @@ const updateHud = (): void => {
 const updateCamera = (dt: number, now: number): void => {
   const forward = viewDirection();
   const focus = playerPosition.add(new Vector3(0, 2.05, 0));
-  let wantedPosition = focus.subtract(forward.scale(10.2));
+  let wantedPosition = focus.subtract(forward.scale(14));
   if (segmentBlocked(focus, wantedPosition)) wantedPosition = focus.subtract(forward.scale(5.8));
   camera.position = Vector3.Lerp(camera.position, wantedPosition, clamp(dt * 7.5, 0, 1));
   camera.setTarget(focus);
@@ -767,7 +763,6 @@ const updatePhysicsStep = (dt: number): void => {
   if (Math.abs(playerPosition.x) > 116 || Math.abs(playerPosition.z) > 116 || playerPosition.y < -18) respawn();
   player.position.copyFrom(playerPosition);
   if (velocity.lengthSquared() > 0.1) player.rotation.y = Math.atan2(velocity.x, velocity.z);
-  playerMaterial.emissiveColor = attachedAnchor ? hex("#1fa2ba") : (isBoosting() ? hex("#1c7d9a") : hex("#0b4658"));
   const speed = velocity.length();
   speedLines.classList.toggle("active", speed > 15 || isBoosting());
 };
@@ -964,7 +959,24 @@ engine.runRenderLoop(() => {
     updateCandidateMarker(dt);
     updateHud();
   }
+  art.updateEffects(dt);
+  animateHero(dt, velocity.length(), grounded, !!attachedAnchor);
+  animateGiant(now / 1000, giantHp, weakpointFlash);
+  weakpoint.setEnabled(giantHp > 0);
+  weakpointRing.setEnabled(giantHp > 0);
   scene.render();
 });
 
 window.addEventListener("resize", () => engine.resize());
+
+// Read-only development diagnostics for real input and rendering QA. No production API.
+if (import.meta.env.DEV) {
+  Object.defineProperty(window, "skybreakDebug", { value: () => ({
+    position: playerPosition.asArray(), speed: velocity.length(), grounded,
+    attached: attachedAnchor?.name ?? null, candidate: candidateAnchor?.name ?? null,
+    courseStage, coins: coinsCollected, giantHp, boosting: isBoosting(), stageCleared,
+    render: { drawCalls: instrumentation?.drawCallsCounter.current ?? 0, activeMeshes: scene.getActiveMeshes().length,
+      vertices: scene.getTotalVertices(), materials: scene.materials.length, textures: scene.textures.length,
+      width: engine.getRenderWidth(), height: engine.getRenderHeight() },
+  }) });
+}
