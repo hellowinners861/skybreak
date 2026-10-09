@@ -9,6 +9,7 @@ import {
   MeshBuilder,
   Scene,
   SceneInstrumentation,
+  ShadowGenerator,
   StandardMaterial,
   TransformNode,
   UniversalCamera,
@@ -17,6 +18,7 @@ import {
 import { collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
 import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
 import { COMIC, createComicArt } from "./comic-art";
+import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -97,7 +99,7 @@ hemi.intensity = 0.55;
 hemi.diffuse = new Color3(1, .97, .9);
 hemi.groundColor = new Color3(.28, .40, .62);
 
-const sun = new DirectionalLight("city-sun", new Vector3(-0.35, -1, 0.42), scene);
+const sun = new DirectionalLight("city-sun", SUN_DIRECTION.negate(), scene);
 sun.position = new Vector3(-80, 150, -100);
 sun.intensity = 0.48;
 
@@ -121,25 +123,22 @@ const weakpointMaterial = material("weakpoint-material", COMIC.yellow, "#6a5010"
 const markerMaterial = material("target-marker-material", COMIC.cream, "#756e5d");
 const markerGiantMaterial = markerMaterial;
 
-const skybox = MeshBuilder.CreateBox("skybox", { size: 500 }, scene);
-const skyMaterial = material("sky-material", COMIC.sky, COMIC.sky);
-skyMaterial.disableLighting = true;
-skyMaterial.backFaceCulling = false;
-skybox.material = skyMaterial;
-skybox.infiniteDistance = true;
-skybox.isPickable = false;
+const updateSky = createCitySky(scene);
 
 const ground = MeshBuilder.CreateBox("arena-ground", { width: 240, height: 1, depth: 240 }, scene);
 ground.position.y = -0.5;
 ground.material = groundMaterial;
 ground.isPickable = false;
+ground.receiveShadows = true;
 
 const roadA = MeshBuilder.CreateBox("road-east-west", { width: 240, height: 0.12, depth: 5 }, scene);
 roadA.position.y = 0.06;
 roadA.material = roadMaterial;
+roadA.receiveShadows = true;
 const roadB = MeshBuilder.CreateBox("road-north-south", { width: 5, height: 0.13, depth: 240 }, scene);
 roadB.position.y = 0.07;
 roadB.material = roadMaterial;
+roadB.receiveShadows = true;
 
 const buildings: Building[] = [];
 const anchors: Anchor[] = [];
@@ -154,12 +153,8 @@ const buildingLayouts: Array<[number, number, number, number, number]> = [
 
 for (let index = 0; index < buildingLayouts.length; index += 1) {
   const [x, z, halfX, halfZ, height] = buildingLayouts[index];
-  const building = MeshBuilder.CreateBox(`building-${index + 1}`, {
-    width: halfX * 2,
-    height,
-    depth: halfZ * 2,
-  }, scene);
-  building.position = new Vector3(x, height / 2, z);
+  const building = createBuildingShell(`building-${index + 1}`, halfX, halfZ, height, index, scene);
+  building.position = new Vector3(x, 0, z);
   building.material = material(`building-mat-${index + 1}`, buildingPalette[index % buildingPalette.length]);
 
   const roof = MeshBuilder.CreateBox(`roof-${index + 1}`, {
@@ -207,9 +202,23 @@ art.decorateCity(buildingLayouts);
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
 const staticLots = buildings.map(({ mesh }) => mesh);
-Mesh.MergeMeshes(staticLots, true, true, undefined, false, true);
+const cityShells = Mesh.MergeMeshes(staticLots, true, true, undefined, false, true);
 const staticRoofs = scene.meshes.filter(mesh => /^roof-\d+$/.test(mesh.name)) as Mesh[];
-Mesh.MergeMeshes(staticRoofs, true, true);
+const cityRoofs = Mesh.MergeMeshes(staticRoofs, true, true);
+// Static sun shadows render once, keeping city depth affordable on mobile.
+const cityShadows = new ShadowGenerator(1024, sun);
+cityShadows.usePercentageCloserFiltering = true;
+cityShadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
+cityShadows.setDarkness(.3);
+cityShadows.bias = .003;
+cityShadows.normalBias = .05;
+if (cityShells) cityShadows.addShadowCaster(cityShells);
+if (cityRoofs) cityShadows.addShadowCaster(cityRoofs);
+for (const mesh of scene.meshes) {
+  if (mesh.name === "city-batch-city-sage" || mesh.name === "city-batch-city-leaf") cityShadows.addShadowCaster(mesh);
+}
+const cityShadowMap = cityShadows.getShadowMap();
+if (cityShadowMap) cityShadowMap.refreshRate = 0;
 
 const weakpoint = MeshBuilder.CreateSphere("giant-weakpoint", { diameter: 2.15, segments: 12 }, scene);
 weakpoint.position = giantRoot.position.add(new Vector3(0, 14, -3.45));
@@ -960,6 +969,7 @@ engine.runRenderLoop(() => {
     updateHud();
   }
   art.updateEffects(dt);
+  updateSky(dt);
   animateHero(dt, velocity.length(), grounded, !!attachedAnchor);
   animateGiant(now / 1000, giantHp, weakpointFlash);
   weakpoint.setEnabled(giantHp > 0);
