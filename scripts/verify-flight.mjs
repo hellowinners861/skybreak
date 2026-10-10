@@ -52,7 +52,7 @@ const verifyInvariants = () => {
   assert.ok(Math.abs(energyAfter - energyBefore) < 24, "neutral rope integration remains energy-stable");
   const launch = { position: [0, 1.15, 0], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
   flight.attachToAnchor(launch, anchors[0], [0, 0, 1]);
-  assert.ok(launch.velocity[1] >= 18 && !launch.grounded, "street attach lifts upward");
+  assert.ok(launch.velocity[1] === 3 && !launch.grounded, "street attach starts with a small takeoff impulse");
   assert.deepEqual(launch.velocity.slice(0,1).concat(launch.velocity.slice(2)),[0,0],"street takeoff avoids launching into a nearby wall");
   for(let i=0;i<60;i++) {
     const previous=[...launch.position];
@@ -60,7 +60,28 @@ const verifyInvariants = () => {
     resolveFlightCollision(launch,previous,[]);
     assert.equal(launch.grounded,false,"street recovery remains airborne");
   }
-  assert.ok(launch.position[1]>7,"street recovery gains height");
+  assert.ok(launch.position[1]>3,"street recovery gains height");
+
+  assert.ok(launch.ropeLength < distance([0,1.15,0],anchors[0])-3,"street motor shortens the rope");
+  assert.ok(launch.reelSpeed>14 && launch.reelSpeed<16,"winch accelerates gradually");
+  for(let i=0;i<120;i++) flight.stepAttached(launch,anchors[0],[0,0,0],1/120,false,-Infinity);
+  assert.equal(launch.recoveryRemaining,0,"recovery stops automatically");
+  const stoppedLength=launch.ropeLength;
+  flight.stepAttached(launch,anchors[0],[0,0,0],1/120,false,-Infinity);
+  assert.equal(launch.ropeLength,stoppedLength,"ordinary swinging does not keep reeling");
+  const transferPosition=[...launch.position], transferVelocity=[...launch.velocity];
+  flight.attachToAnchor(launch,anchors[1],[0,0,1]);
+  assert.deepEqual(launch.position,transferPosition,"transfer preserves position");
+  assert.deepEqual(launch.velocity,transferVelocity,"transfer preserves momentum");
+  assert.equal(launch.recoveryRemaining,0,"airborne transfer stops ground recovery");
+  const recoveries=[30,60,120].map(fps=>{
+    const state={position:[0,1.15,0],velocity:[0,0,0],grounded:true,attached:false,ropeLength:0};
+    flight.attachToAnchor(state,[0,54,0],[0,0,1]);
+    for(let i=0;i<fps*1.5;i++)substeps(1/fps,dt=>flight.stepAttached(state,[0,54,0],[0,0,0],dt,false));
+    return state;
+  });
+  assert.ok(recoveries.every(s=>s.position[1]>19 && s.position[1]<24),"recovery gains useful height without teleporting");
+  assert.ok(recoveries.every(s=>Math.abs(s.position[1]-recoveries[1].position[1])<.05),"recovery is stable across frame rates");
 
   const fixture = () => ({position:[0,25,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:20});
   const small=fixture(), full=fixture();
@@ -100,6 +121,9 @@ assert.equal(nearestVisibleWireTarget([target("outside",2,1.01),target("behind",
 assert.equal(nearestVisibleWireTarget([target("far",200)], [0,1.15,0], .2).target,"far","street-level visible hooks have no range cap");
 assert.equal(nearestVisibleWireTarget([target("far",99)], [0,0,0], .2,98),null,"optional explicit range remains supported");
 assert.equal(nearestVisibleWireTarget([target("old",31),target("new",30.9,.8)], [0,0,0], .2).target,"new","no sticky previous target or centre bias");
+
+assert.equal(nearestVisibleWireTarget([target("current",1),target("next",20)], [0,0,0], .2,Infinity,"current").target,"next","transfer excludes the attached anchor");
+assert.equal(nearestVisibleWireTarget([target("current",1)], [0,0,0], .2,Infinity,"current"),null,"no next anchor returns no replacement");
 
 const simulate = (fps) => {
   const dt = 1 / fps;
