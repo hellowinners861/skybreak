@@ -57,10 +57,34 @@ try {
       );
       const positions = shell.getVerticesData(VertexBuffer.PositionKind);
       const normals = shell.getVerticesData(VertexBuffer.NormalKind);
+      const uvs = shell.getVerticesData(VertexBuffer.UVKind);
       const indices = shell.getIndices();
       assert.ok(
         positions.every(Number.isFinite) && normals.every(Number.isFinite),
       );
+      assert.equal(uvs.length, (positions.length / 3) * 2);
+      assert.ok(uvs.every(Number.isFinite), "finite texture coordinates");
+      for (let face = 0; face < 8; face++) {
+        const vertex = face * 4;
+        const a = positions.slice(vertex * 3, vertex * 3 + 3);
+        const b = positions.slice((vertex + 1) * 3, (vertex + 1) * 3 + 3);
+        const edgeLength = Math.hypot(b[0] - a[0], b[2] - a[2]);
+        assert.ok(
+          Math.abs(uvs[(vertex + 1) * 2] - uvs[vertex * 2] - edgeLength) < 1e-4,
+          "horizontal texel density follows physical distance",
+        );
+        assert.equal(
+          uvs[(vertex + 2) * 2 + 1] - uvs[vertex * 2 + 1],
+          height,
+          "vertical texel density follows physical height",
+        );
+        if (face > 0)
+          assert.equal(
+            uvs[vertex * 2],
+            uvs[(vertex - 3) * 2],
+            "UVs continue across adjacent corners",
+          );
+      }
       for (let i = 0; i < positions.length; i += 3) {
         const [x, y, z] = positions.slice(i, i + 3);
         const [nx, ny, nz] = normals.slice(i, i + 3);
@@ -99,7 +123,7 @@ try {
     }
   }
   console.log(
-    "city verification: PASS (9 shells, collision bounds, outward normals, closed surfaces, mixed batches)",
+    "city verification: PASS (9 shells, collision bounds, outward normals, closed surfaces, metre-scaled UVs, mixed batches)",
   );
 } finally {
   scene.dispose();

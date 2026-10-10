@@ -85,32 +85,52 @@ export function createBuildingShell(
     [-halfX, -halfZ + bevel],
   ];
   const positions: number[] = [],
-    indices: number[] = [];
-  const face = (points: number[][]) => {
+    indices: number[] = [],
+    uvs: number[] = [];
+  const face = (points: number[][], coordinates: number[][]) => {
     const base = positions.length / 3;
     points.forEach((p) => positions.push(...p));
+    coordinates.forEach((uv) => uvs.push(...uv));
     for (let j = 1; j < points.length - 1; j++)
       indices.push(base, base + j, base + j + 1);
   };
+  let perimeter = 0;
   for (let j = 0; j < 8; j++) {
     const a = ring[j],
       b = ring[(j + 1) % 8];
-    face([
-      [a[0], 0, a[1]],
-      [b[0], 0, b[1]],
-      [b[0], height, b[1]],
-      [a[0], height, a[1]],
-    ]);
+    const next = perimeter + Math.hypot(b[0] - a[0], b[1] - a[1]);
+    face(
+      [
+        [a[0], 0, a[1]],
+        [b[0], 0, b[1]],
+        [b[0], height, b[1]],
+        [a[0], height, a[1]],
+      ],
+      [
+        [perimeter, 0],
+        [next, 0],
+        [next, height],
+        [perimeter, height],
+      ],
+    );
+    perimeter = next;
   }
-  face(ring.map(([x, z]) => [x, height, z]));
-  face([...ring].reverse().map(([x, z]) => [x, 0, z]));
+  face(
+    ring.map(([x, z]) => [x, height, z]),
+    ring,
+  );
+  const bottom = [...ring].reverse();
+  face(
+    bottom.map(([x, z]) => [x, 0, z]),
+    bottom,
+  );
   const normals: number[] = [];
   VertexData.ComputeNormals(positions, indices, normals);
   const data = new VertexData();
   data.positions = positions;
   data.indices = indices;
   data.normals = normals;
-  data.uvs = new Array((positions.length / 3) * 2).fill(0);
+  data.uvs = uvs;
   const mesh = new Mesh(name, scene);
   data.applyToMesh(mesh);
   mesh.isPickable = false;
