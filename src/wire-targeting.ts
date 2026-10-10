@@ -11,7 +11,7 @@ export type VisibleWireTarget<T> = {
 };
 
 export function nearestVisibleWireTarget<T>(
-  targets: VisibleWireTarget<T>[], player: FlightVec, nearPlane: number, maxDistance = 98,
+  targets: VisibleWireTarget<T>[], player: FlightVec, nearPlane: number, maxDistance = Infinity,
 ): { target: T; distance: number } | null {
   let nearest: { target: T; distance: number } | null = null;
   for (const point of targets) {

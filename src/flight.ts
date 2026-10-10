@@ -33,7 +33,13 @@ export const attachToAnchor = (state: FlightState, anchor: FlightVec, cameraForw
     const forward = normalize(length(towardAnchor) > .1 ? towardAnchor : [cameraForward[0], 0, cameraForward[2]]);
     state.velocity[0] += forward[0] * 12;
     state.velocity[2] += forward[2] * 12;
-    state.velocity[1] = Math.max(state.velocity[1], 8);
+    // Street-level recovery needs enough lift to leave the ground and steer.
+    // Launch vertically first so a nearby facade does not cancel takeoff at once.
+    if (state.position[1] <= 1.16) {
+      state.velocity[0] = 0;
+      state.velocity[2] = 0;
+      state.velocity[1] = Math.max(state.velocity[1], 28);
+    } else state.velocity[1] = Math.max(state.velocity[1], 8);
     state.grounded = false;
   }
 };
