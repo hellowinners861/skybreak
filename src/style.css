@@ -33,8 +33,6 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
 .message.warn { background: var(--yellow); }
 .message.good { color: var(--paper); background: var(--blue); }
 .desktop-help { position: absolute; bottom: 14px; left: 50%; transform: translateX(-50%); padding: 3px 8px; color: var(--paper); background: var(--ink); font-size: 9px; white-space: nowrap; }
-.reticle { position: absolute; z-index: 2; top: 50%; left: 50%; width: 24px; height: 24px; transform: translate(-50%,-50%); pointer-events: none; border: 2px solid var(--paper); border-radius: 50%; box-shadow: 0 0 0 1.5px var(--ink); }
-.reticle span { position: absolute; left: 8px; top: 8px; width: 4px; height: 4px; background: var(--ink); border-radius: 50%; }
 #speed-lines { position: absolute; inset: 0; z-index: 1; pointer-events: none; opacity: 0; overflow: hidden; transition: opacity .2s; mask-image: radial-gradient(ellipse, transparent 35%, black 85%); }
 #speed-lines.active { opacity: .5; }
 .speed-line { position: absolute; left: 50%; top: 50%; width: 2px; height: 65vh; transform-origin: 50% 100%; background: linear-gradient(transparent 35%, var(--paper) 75%, var(--ink)); }

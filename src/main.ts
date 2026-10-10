@@ -23,6 +23,8 @@ import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-enviro
 import { createWallMaterials } from "./wall-materials";
 import { createBuildingFinishes, createRoofDeck } from "./building-finishes";
 import { createCityStreets } from "./city-streets";
+import { nearestVisibleWireTarget, type VisibleWireTarget } from "./wire-targeting";
+import { resolveFlightCollision } from "./flight-collision";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -452,33 +454,22 @@ const findCandidate = (): void => {
   const up = Vector3.Cross(forward, right).normalize();
   const aspect = engine.getRenderWidth() / Math.max(1, engine.getRenderHeight());
   const tanHalfFov = Math.tan(camera.fov / 2);
-  const candidates: Array<{ anchor: Anchor; distance: number; score: number }> = [];
+  const candidates: VisibleWireTarget<Anchor>[] = [];
   for (const anchor of anchors) {
-    if (anchor.kind === "course" && anchor.courseIndex !== courseStage) continue;
-    const offset = anchor.position.subtract(playerPosition);
-    const distance = offset.length();
-    const cameraOffset = anchor.position.subtract(camera.position).normalize();
-    if (distance < 2.2 || distance > 98) continue;
-    const toward = offset.scale(1 / distance);
-    const forwardDot = Vector3.Dot(cameraOffset, forward);
-    if (forwardDot <= 0) continue;
-    const screenX = Vector3.Dot(cameraOffset, right) / Math.max(forwardDot, 0.25) / (tanHalfFov * aspect);
-    const screenY = Vector3.Dot(cameraOffset, up) / Math.max(forwardDot, 0.25) / tanHalfFov;
-    // Opening hooks sit overhead; keep them selectable with the city-facing camera.
-    const verticalAimWindow = anchor.kind === "course" ? .85 : .42;
-    if (Math.abs(screenX) > .42 || Math.abs(screenY) > verticalAimWindow) continue;
-    if (segmentBlocked(camera.position, anchor.position, anchor) || segmentBlocked(playerPosition, anchor.position, anchor)) continue;
-    const courseBonus = anchor.kind === "course" ? -1.2 : 0;
-    candidates.push({ anchor, distance, score: Math.abs(screenX) + Math.abs(screenY) + distance * 0.002 + courseBonus });
+    const offset = anchor.position.subtract(camera.position);
+    const depth = Vector3.Dot(offset, forward);
+    if (depth <= camera.minZ) continue;
+    const screenX = Vector3.Dot(offset, right) / (depth * tanHalfFov * aspect);
+    const screenY = Vector3.Dot(offset, up) / (depth * tanHalfFov);
+    if (Math.abs(screenX) > 1 || Math.abs(screenY) > 1) continue;
+    candidates.push({
+      target: anchor, position: [anchor.position.x, anchor.position.y, anchor.position.z],
+      screenX, screenY, cameraDepth: depth,
+      blocked: segmentBlocked(camera.position, anchor.position) || segmentBlocked(playerPosition, anchor.position),
+    });
   }
-  candidates.sort((a, b) => a.score - b.score);
-  const best = candidates[0];
-  if (candidateAnchor && candidates.some((item) => item.anchor === candidateAnchor && item.score <= (best?.score ?? Infinity) + 0.08)) {
-    const current = candidates.find((item) => item.anchor === candidateAnchor)!;
-    candidateDistance = current.distance;
-    return;
-  }
-  candidateAnchor = best?.anchor ?? null;
+  const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ);
+  candidateAnchor = best?.target ?? null;
   candidateDistance = best?.distance ?? 0;
 };
 
@@ -515,78 +506,6 @@ const updateWire = (): void => {
   } else {
     MeshBuilder.CreateLines("active-wire", { points, instance: wireMesh });
   }
-};
-
-const moveAndCollide = (dt: number): void => {
-  let next = playerPosition.add(velocity.scale(dt));
-  grounded = false;
-
-  if (next.y <= playerHalfHeight) {
-    next.y = playerHalfHeight;
-    if (velocity.y < 0) velocity.y = 0;
-    grounded = true;
-  }
-
-  for (const building of buildings) {
-    const overlapX = building.halfX + playerRadius - Math.abs(next.x - building.x);
-    const overlapZ = building.halfZ + playerRadius - Math.abs(next.z - building.z);
-    const crossesHeight = next.y - playerHalfHeight <= building.top + 0.05 && next.y + playerHalfHeight > 0;
-    if (overlapX <= 0 || overlapZ <= 0 || !crossesHeight) continue;
-
-    const wasAbove = playerPosition.y - playerHalfHeight >= building.top - 0.05;
-    const isLanding = wasAbove && next.y - playerHalfHeight <= building.top + 0.05 && velocity.y <= 0;
-    if (isLanding) {
-      next.y = building.top + playerHalfHeight;
-      velocity.y = 0;
-      grounded = true;
-      continue;
-    }
-
-    if (next.y < building.top + playerHalfHeight) {
-      if (overlapX < overlapZ) {
-        const side = Math.sign(next.x - building.x) || Math.sign(playerPosition.x - building.x) || 1;
-        next.x = building.x + side * (building.halfX + playerRadius);
-        if (velocity.x * side < 0) velocity.x = 0;
-      } else {
-        const side = Math.sign(next.z - building.z) || Math.sign(playerPosition.z - building.z) || 1;
-        next.z = building.z + side * (building.halfZ + playerRadius);
-        if (velocity.z * side < 0) velocity.z = 0;
-      }
-    }
-  }
-
-  playerPosition.copyFrom(next);
-};
-
-const resolveAttachedPenetration = (): boolean => {
-  let groundedOnSurface = false;
-  if (playerPosition.y < playerHalfHeight) {
-    playerPosition.y = playerHalfHeight;
-    if (velocity.y < 0) velocity.y = 0;
-    groundedOnSurface = true;
-  }
-  for (const building of buildings) {
-    const overlapX = building.halfX + playerRadius - Math.abs(playerPosition.x - building.x);
-    const overlapZ = building.halfZ + playerRadius - Math.abs(playerPosition.z - building.z);
-    const crossesHeight = playerPosition.y - playerHalfHeight < building.top && playerPosition.y + playerHalfHeight > 0;
-    if (overlapX <= 0 || overlapZ <= 0 || !crossesHeight || playerPosition.y >= building.top + playerHalfHeight) continue;
-    if (playerPosition.y >= building.top + playerHalfHeight - 0.35 && velocity.y <= 0) {
-      playerPosition.y = building.top + playerHalfHeight;
-      velocity.y = 0;
-      groundedOnSurface = true;
-      continue;
-    }
-    if (overlapX < overlapZ) {
-      const side = Math.sign(playerPosition.x - building.x) || 1;
-      playerPosition.x = building.x + side * (building.halfX + playerRadius);
-      if (velocity.x * side < 0) velocity.x = 0;
-    } else {
-      const side = Math.sign(playerPosition.z - building.z) || 1;
-      playerPosition.z = building.z + side * (building.halfZ + playerRadius);
-      if (velocity.z * side < 0) velocity.z = 0;
-    }
-  }
-  return groundedOnSurface;
 };
 
 const respawn = (): void => {
@@ -665,7 +584,7 @@ const resetStage = (): void => {
     coin.mesh.setEnabled(true);
     coin.mesh.scaling.setAll(1);
   }
-  showMessage("狙ってWIRE → 飛ぶ → RELEASE", "normal");
+  showMessage("画面内の最寄りフックへWIRE → RELEASE", "normal");
 };
 
 const updateHud = (): void => {
@@ -721,10 +640,10 @@ const updateHud = (): void => {
     anchorReadout.textContent = `● ${attachedAnchor.name} / ${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m`;
     wireLabel.textContent = "RELEASE";
   } else if (candidateAnchor) {
-    anchorReadout.textContent = `◎ ${candidateAnchor.name} / ${Math.round(candidateDistance)}m`;
+    anchorReadout.textContent = `◎ 最寄り ${candidateAnchor.name} / ${Math.round(candidateDistance)}m`;
     wireLabel.textContent = "WIRE";
   } else {
-    anchorReadout.textContent = "建物のフックに照準を合わせよう";
+    anchorReadout.textContent = "画面内のフックに近づこう（98m以内）";
     wireLabel.textContent = "WIRE";
   }
 };
@@ -757,40 +676,43 @@ const updatePhysicsStep = (dt: number): void => {
   if (boostTimer <= 0) boosting = false;
   if (attachedAnchor && segmentBlocked(playerPosition, attachedAnchor.position, attachedAnchor)) detachWire(true);
   const movement = getMovement();
+  const previous: [number, number, number] = [playerPosition.x, playerPosition.y, playerPosition.z];
+  flightState.position = [...previous];
+  flightState.velocity = [velocity.x, velocity.y, velocity.z];
+  flightState.grounded = grounded;
+  flightState.ropeLength = ropeLength;
   if (attachedAnchor) {
-    flightState.position = [playerPosition.x, playerPosition.y, playerPosition.z];
-    flightState.velocity = [velocity.x, velocity.y, velocity.z];
-    flightState.grounded = grounded;
-    flightState.ropeLength = ropeLength;
-    const boostForward = camera.getForwardRay(1).direction;
-    stepAttached(flightState, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z], [movement.x, movement.y, movement.z], dt, isBoosting(), playerHalfHeight, [boostForward.x, Math.max(0, boostForward.y), boostForward.z]);
-    playerPosition.copyFromFloats(...flightState.position);
-    velocity.copyFromFloats(...flightState.velocity);
-    ropeLength = flightState.ropeLength;
-    grounded = resolveAttachedPenetration() || flightState.grounded;
-  } else {
-    if (grounded) {
-      const desiredX = movement.x * (isBoosting() ? 18 : 13);
-      const desiredZ = movement.z * (isBoosting() ? 18 : 13);
-      velocity.x = approach(velocity.x, desiredX, 19 * dt);
-      velocity.z = approach(velocity.z, desiredZ, 19 * dt);
-      if (movement.lengthSquared() < 0.001) {
-        velocity.x = approach(velocity.x, 0, 22 * dt);
-        velocity.z = approach(velocity.z, 0, 22 * dt);
-      }
-    } else {
-      const detachedState: FlightState = {
-        position: [playerPosition.x, playerPosition.y, playerPosition.z],
-        velocity: [velocity.x, velocity.y, velocity.z],
-        grounded: false,
-        attached: false,
-        ropeLength: 0,
-      };
-      const forward = viewDirection();
-      stepDetached(detachedState, [movement.x, 0, movement.z], dt, isBoosting(), [forward.x, Math.max(0, forward.y), forward.z], gravity, maxSpeed, false);
-      velocity.copyFromFloats(...detachedState.velocity);
+    const forward = viewDirection();
+    stepAttached(flightState, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z],
+      [movement.x, 0, movement.z], dt, isBoosting(), -Infinity,
+      [forward.x, Math.max(0, forward.y), forward.z]);
+  } else if (grounded) {
+    const desiredX = movement.x * (isBoosting() ? 18 : 13);
+    const desiredZ = movement.z * (isBoosting() ? 18 : 13);
+    flightState.velocity[0] = approach(velocity.x, desiredX, 19 * dt);
+    flightState.velocity[2] = approach(velocity.z, desiredZ, 19 * dt);
+    if (movement.lengthSquared() < .001) {
+      flightState.velocity[0] = approach(velocity.x, 0, 22 * dt);
+      flightState.velocity[2] = approach(velocity.z, 0, 22 * dt);
     }
-    moveAndCollide(dt);
+    // Gravity also acts when walking off a roof; collision keeps supported feet up.
+    flightState.velocity[1] += gravity * dt;
+    flightState.position = flightState.position.map((v,i) => v + flightState.velocity[i] * dt) as [number,number,number];
+  } else {
+    const forward = viewDirection();
+    stepDetached(flightState, [movement.x, 0, movement.z], dt, isBoosting(),
+      [forward.x, Math.max(0, forward.y), forward.z], gravity, maxSpeed);
+  }
+  const touched = resolveFlightCollision(flightState, previous, buildings, playerHalfHeight, playerRadius);
+  playerPosition.copyFromFloats(...flightState.position);
+  velocity.copyFromFloats(...flightState.velocity);
+  ropeLength = flightState.ropeLength;
+  grounded = flightState.grounded;
+  // Release on contact instead of repeatedly pulling the character into a roof
+  // or fighting the wall correction on the following physics step.
+  if (attachedAnchor && touched) {
+    detachWire(false);
+    showMessage(grounded ? "着地 / ワイヤー解除" : "壁に接触 / ワイヤー解除", "normal");
   }
 
   if (Math.abs(playerPosition.x) > 116 || Math.abs(playerPosition.z) > 116 || playerPosition.y < -18) respawn();
@@ -1006,7 +928,7 @@ window.addEventListener("resize", () => engine.resize());
 // Read-only development diagnostics for real input and rendering QA. No production API.
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
-    position: playerPosition.asArray(), speed: velocity.length(), grounded,
+    position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, candidateDistance, speed: velocity.length(), grounded,
     attached: attachedAnchor?.name ?? null, candidate: candidateAnchor?.name ?? null,
     courseStage, coins: coinsCollected, giantHp, boosting: isBoosting(), stageCleared,
     render: { drawCalls: instrumentation?.drawCallsCounter.current ?? 0, activeMeshes: scene.getActiveMeshes().length,
