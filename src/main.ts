@@ -22,6 +22,7 @@ import { COMIC, createComicArt } from "./comic-art";
 import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
 import { createWallMaterials } from "./wall-materials";
 import { createBuildingFinishes, createRoofDeck } from "./building-finishes";
+import { createCityStreets } from "./city-streets";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -118,7 +119,6 @@ const material = (name: string, diffuse: string, emissive = "#000000"): Standard
 };
 
 const groundMaterial = material("ground-material", "#b6c9c8");
-const roadMaterial = material("road-material", "#557b97");
 const anchorMaterial = material("anchor-material", COMIC.yellow, "#6a5010");
 const anchorGiantMaterial = anchorMaterial;
 const coinMaterial = material("coin-material", COMIC.yellow, "#55420e");
@@ -134,15 +134,6 @@ ground.material = groundMaterial;
 ground.isPickable = false;
 ground.receiveShadows = true;
 
-const roadA = MeshBuilder.CreateBox("road-east-west", { width: 240, height: 0.12, depth: 5 }, scene);
-roadA.position.y = 0.06;
-roadA.material = roadMaterial;
-roadA.receiveShadows = true;
-const roadB = MeshBuilder.CreateBox("road-north-south", { width: 5, height: 0.13, depth: 240 }, scene);
-roadB.position.y = 0.07;
-roadB.material = roadMaterial;
-roadB.receiveShadows = true;
-
 const buildings: Building[] = [];
 const anchors: Anchor[] = [];
 const wallMaterials = createWallMaterials(scene);
@@ -153,6 +144,8 @@ const buildingLayouts: Array<[number, number, number, number, number]> = [
   [-70, 40, 11, 10, 16], [-42, 42, 10, 8, 22], [42, 39, 12, 9, 28], [70, 38, 9, 11, 18],
   [-62, 72, 13, 9, 20], [-30, 72, 10, 11, 15], [30, 72, 10, 11, 24], [62, 72, 12, 10, 24],
 ];
+
+createCityStreets(scene, buildingLayouts);
 
 for (let index = 0; index < buildingLayouts.length; index += 1) {
   const [x, z, halfX, halfZ, height] = buildingLayouts[index];
