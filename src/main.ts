@@ -72,6 +72,7 @@ const stickKnob = select<HTMLElement>("#stick-knob");
 const boostButton = select<HTMLButtonElement>("#boost-button");
 const attackButton = select<HTMLButtonElement>("#attack-button");
 const wireButton = select<HTMLButtonElement>("#wire-button");
+const releaseButton = select<HTMLButtonElement>("#release-button");
 const wireLabel = select<HTMLElement>("#wire-label");
 const clearScreen = select<HTMLElement>("#clear-screen");
 const clearCoins = select<HTMLElement>("#clear-coins");
@@ -468,20 +469,17 @@ const findCandidate = (): void => {
       blocked: segmentBlocked(camera.position, anchor.position),
     });
   }
-  const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ);
+  const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ, Infinity, attachedAnchor ?? undefined);
   candidateAnchor = best?.target ?? null;
   candidateDistance = best?.distance ?? 0;
 };
 
 const toggleWire = (): void => {
   if (stageCleared) return;
-  if (attachedAnchor) {
-    detachWire(true);
-    return;
-  }
+  const transferring = !!attachedAnchor;
   findCandidate();
   if (!candidateAnchor) {
-    showMessage("接続できるアンカーがありません", "warn");
+    showMessage(transferring ? "画面内に次のポイントがありません / 接続を維持" : "接続できるアンカーがありません", "warn");
     return;
   }
   attachedAnchor = candidateAnchor;
@@ -494,7 +492,9 @@ const toggleWire = (): void => {
   ropeLength = flightState.ropeLength;
   grounded = flightState.grounded;
   if (candidateAnchor.kind === "course" && candidateAnchor.courseIndex === courseStage) courseStarted = true;
-  showMessage(`${candidateAnchor.name} に接続`, "good");
+  showMessage(`${candidateAnchor.name} に${transferring ? "乗り換え" : "接続"}`, "good");
+  findCandidate();
+  updateHud();
 };
 
 const updateWire = (): void => {
@@ -584,10 +584,11 @@ const resetStage = (): void => {
     coin.mesh.setEnabled(true);
     coin.mesh.scaling.setAll(1);
   }
-  showMessage("画面内の最寄りフックへWIRE → RELEASE", "normal");
+  showMessage("画面内の最寄りフックへWIRE → NEXTで乗り換え", "normal");
 };
 
 const updateHud = (): void => {
+  releaseButton.disabled = !attachedAnchor;
   coinCount.textContent = `COIN ${String(coinsCollected).padStart(2, "0")} / 12`;
   speedReadout.textContent = String(Math.round(velocity.length()));
   speedFill.style.width = `${Math.min(100, velocity.length() / maxSpeed * 100)}%`;
@@ -596,7 +597,7 @@ const updateHud = (): void => {
   giantHpReadout.setAttribute("aria-label", `巨人 HP ${giantHp} / 3`);
   select<HTMLElement>(".eyebrow").textContent = courseStage < 3 ? "FLIGHT CHECK / はじめの飛行" : "MISSION / コイン回収・巨人撃破";
   const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
-  if (courseStage < 3) objective.textContent = creditedAnchor ? "解除して次のアンカーへ" : "3つのアンカーをつないで飛ぼう";
+  if (courseStage < 3) objective.textContent = creditedAnchor ? "NEXTで次のアンカーへ" : "3つのアンカーをつないで飛ぼう";
   else if (giantHp <= 0 && coinsCollected >= 8) objective.textContent = "目標達成。STAGE CLEAR";
   else if (giantHp <= 0) objective.textContent = `あと${Math.max(0, 8 - coinsCollected)}枚のコインを集めよう`;
   else if (coinsCollected >= 8) objective.textContent = "巨人の弱点へ近づいて攻撃しよう";
@@ -606,7 +607,7 @@ const updateHud = (): void => {
     const nextCourse = courseAnchorPositions[courseStage];
     const creditedAnchor = attachedAnchor?.kind === "course" && (attachedAnchor.courseIndex ?? -1) < courseStage;
     if (creditedAnchor) {
-      routeReadout.textContent = `${courseStage} / 3　RELEASE → 次のアンカー`;
+      routeReadout.textContent = `${courseStage} / 3　NEXT → 次のアンカー`;
     } else {
       const offset = nextCourse.subtract(playerPosition);
       const distance = offset.length();
@@ -638,7 +639,8 @@ const updateHud = (): void => {
 
   if (attachedAnchor) {
     anchorReadout.textContent = `● ${attachedAnchor.name} / ${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m`;
-    wireLabel.textContent = "RELEASE";
+    wireLabel.textContent = "NEXT";
+    if (candidateAnchor) anchorReadout.textContent += ` → 次 ${candidateAnchor.name}`;
   } else if (candidateAnchor) {
     anchorReadout.textContent = `◎ 最寄り ${candidateAnchor.name} / ${Math.round(candidateDistance)}m`;
     wireLabel.textContent = "WIRE";
@@ -663,7 +665,7 @@ const updateCamera = (dt: number, now: number): void => {
 };
 
 const updateCandidateMarker = (dt: number): void => {
-  const selected = attachedAnchor ?? candidateAnchor;
+  const selected = candidateAnchor ?? attachedAnchor;
   if (!selected) {
     marker.setEnabled(false);
     return;
@@ -844,6 +846,7 @@ wireButton.addEventListener("pointerdown", (event: Event) => {
   pointer.preventDefault();
   pointer.stopPropagation();
 });
+releaseButton.addEventListener("click", (event) => { event.preventDefault(); detachWire(true); });
 wireButton.addEventListener("click", (event: MouseEvent) => {
   event.preventDefault();
   event.stopPropagation();
@@ -884,6 +887,7 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
   if (event.code === "Space") toggleWire();
+  if (event.code === "KeyQ") detachWire(true);
   if (event.code === "ShiftLeft" || event.code === "ShiftRight") triggerBoost();
   if (event.code === "KeyE") attack();
   if (event.code === "KeyR") resetStage();
@@ -936,7 +940,7 @@ window.addEventListener("resize", () => engine.resize());
 // Read-only development diagnostics for real input and rendering QA. No production API.
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
-    position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, candidateDistance, speed: velocity.length(), grounded,
+    position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, recoveryRemaining: flightState.recoveryRemaining ?? 0, candidateDistance, speed: velocity.length(), grounded,
     attached: attachedAnchor?.name ?? null, candidate: candidateAnchor?.name ?? null,
     courseStage, coins: coinsCollected, giantHp, boosting: isBoosting(), stageCleared,
     render: { drawCalls: instrumentation?.drawCallsCounter.current ?? 0, activeMeshes: scene.getActiveMeshes().length,

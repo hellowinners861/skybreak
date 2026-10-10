@@ -91,3 +91,6 @@ button:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
 @media (prefers-reduced-motion: reduce) {
   #speed-lines { display: none; } button, .message { transition: none; }
 }
+
+.touch-actions .release { position: absolute; right: 0; bottom: calc(100% + 8px); width: 82px; height: 38px; border-radius: 12px; background: var(--paper); color: var(--ink); }
+.release:disabled { opacity: .4; pointer-events: none; }

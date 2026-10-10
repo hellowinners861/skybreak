@@ -12,6 +12,8 @@ export type FlightState = {
   grounded: boolean;
   attached: boolean;
   ropeLength: number;
+  recoveryRemaining?: number;
+  reelSpeed?: number;
 };
 
 const length = (v: FlightVec): number => Math.hypot(v[0], v[1], v[2]);
@@ -27,6 +29,8 @@ export const crossedCourseAnchor = (previousZ: number, nextZ: number, anchor: Fl
 export const attachToAnchor = (state: FlightState, anchor: FlightVec, cameraForward: FlightVec): void => {
   const offset: FlightVec = [state.position[0] - anchor[0], state.position[1] - anchor[1], state.position[2] - anchor[2]];
   state.attached = true;
+  state.recoveryRemaining = 0;
+  state.reelSpeed = 0;
   state.ropeLength = Math.max(length(offset), 0.5);
   if (state.grounded) {
     const towardAnchor: FlightVec = [-offset[0], 0, -offset[2]];
@@ -38,7 +42,8 @@ export const attachToAnchor = (state: FlightState, anchor: FlightVec, cameraForw
     if (state.position[1] <= 1.16) {
       state.velocity[0] = 0;
       state.velocity[2] = 0;
-      state.velocity[1] = Math.max(state.velocity[1], 18);
+      state.velocity[1] = Math.max(state.velocity[1], 3);
+      if (anchor[1] > state.position[1] + 2) state.recoveryRemaining = 1.4;
     } else state.velocity[1] = Math.max(state.velocity[1], 6);
     state.grounded = false;
   }
@@ -47,6 +52,16 @@ export const attachToAnchor = (state: FlightState, anchor: FlightVec, cameraForw
 export const stepAttached = (state: FlightState, anchor: FlightVec, input: FlightVec, dt: number, boosting: boolean, groundY = 1.15, boostForward: FlightVec = [0, 0, 1]): void => {
   const offset: FlightVec = [state.position[0] - anchor[0], state.position[1] - anchor[1], state.position[2] - anchor[2]];
   const radial = normalize(offset);
+  let reelSpeed = 0;
+  if ((state.recoveryRemaining ?? 0) > 0) {
+    const reelDt = Math.min(dt, state.recoveryRemaining!);
+    const previousSpeed = state.reelSpeed ?? 0;
+    state.reelSpeed = Math.min(18, previousSpeed + 30 * reelDt);
+    const shortened = Math.min(Math.max(0, state.ropeLength - 2), (previousSpeed + state.reelSpeed) * .5 * reelDt);
+    state.ropeLength -= shortened;
+    reelSpeed = shortened / Math.max(dt, .000001);
+    state.recoveryRemaining = Math.max(0, state.recoveryRemaining! - dt);
+  }
   state.velocity[1] += -18 * dt;
   const tangentDot = dot(input, radial);
   const tangent: FlightVec = [input[0] - radial[0] * tangentDot, input[1] - radial[1] * tangentDot, input[2] - radial[2] * tangentDot];
@@ -76,10 +91,12 @@ export const stepAttached = (state: FlightState, anchor: FlightVec, input: Fligh
     state.position = [anchor[0] + nextOffset[0] * scale, anchor[1] + nextOffset[1] * scale, anchor[2] + nextOffset[2] * scale];
     const correctedRadial = normalize([state.position[0] - anchor[0], state.position[1] - anchor[1], state.position[2] - anchor[2]]);
     const outward = dot(state.velocity, correctedRadial);
-    if (outward > 0) {
-      state.velocity[0] -= correctedRadial[0] * outward;
-      state.velocity[1] -= correctedRadial[1] * outward;
-      state.velocity[2] -= correctedRadial[2] * outward;
+    // A powered spool pulls inward at its shortening speed. Tangential
+    // momentum survives; normal swinging resumes when the short recovery ends.
+    if (outward > -reelSpeed) {
+      state.velocity[0] -= correctedRadial[0] * (outward + reelSpeed);
+      state.velocity[1] -= correctedRadial[1] * (outward + reelSpeed);
+      state.velocity[2] -= correctedRadial[2] * (outward + reelSpeed);
     }
   } else state.position = next;
   if (state.position[1] < groundY) {
@@ -89,7 +106,7 @@ export const stepAttached = (state: FlightState, anchor: FlightVec, input: Fligh
   } else state.grounded = false;
 };
 
-export const releaseFlight = (state: FlightState): void => { state.attached = false; };
+export const releaseFlight = (state: FlightState): void => { state.attached = false; state.recoveryRemaining = 0; state.reelSpeed = 0; };
 
 export const stepDetached = (state: FlightState, input: FlightVec, dt: number, boosting: boolean, boostForward: FlightVec = [0, 0.35, 1], gravity = -18, maxSpeed = 42, integratePosition = true): void => {
   const drag = Math.pow(0.999, dt * 60);

@@ -28,7 +28,7 @@
         <div id="anchor-readout" class="anchor-readout">画面内の最寄りフックを探しています…</div>
         <div class="flight-gauge"><strong id="speed-readout">0</strong><span>m/s</span><div class="gauge-track"><i id="speed-fill"></i></div></div>
         <div id="message" class="message" role="status"></div>
-        <div class="desktop-help">WASD 移動　｜　マウスドラッグ カメラ　｜　Space ワイヤー　｜　Shift ブースト　｜　E 攻撃　｜　R リトライ</div>
+        <div class="desktop-help">WASD 移動　｜　マウスドラッグ カメラ　｜　Space 接続・乗換　｜　Q 解除　｜　Shift ブースト　｜　E 攻撃　｜　R リトライ</div>
       </section>
 
 
@@ -38,9 +38,10 @@
           <span>MOVE</span>
         </div>
         <div class="touch-actions">
+          <button id="release-button" class="action-button release" type="button" aria-label="ワイヤーを解除" disabled><span>RELEASE</span></button>
           <button id="boost-button" class="action-button boost" type="button" aria-label="ブーストで加速"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M18 3 6 19h10l-2 10 12-16H16z"/></svg><span>BOOST</span></button>
           <button id="attack-button" class="action-button attack" type="button" aria-label="弱点を攻撃"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="m24 3 5 0 0 5-16 15-5-5zM5 17l10 10M3 29l7-7"/></svg><span>ATTACK</span></button>
-          <button id="wire-button" class="action-button wire" type="button" aria-label="ワイヤー接続・解除" aria-pressed="false"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 29V17a8 8 0 0 1 16 0v3a5 5 0 0 1-10 0v-3M8 10V3M4 7l4-4 4 4"/></svg><span id="wire-label">WIRE</span></button>
+          <button id="wire-button" class="action-button wire" type="button" aria-label="ワイヤー接続・次のポイントへ乗り換え" aria-pressed="false"><svg viewBox="0 0 32 32" aria-hidden="true"><path d="M8 29V17a8 8 0 0 1 16 0v3a5 5 0 0 1-10 0v-3M8 10V3M4 7l4-4 4 4"/></svg><span id="wire-label">WIRE</span></button>
         </div>
       </section>
 
