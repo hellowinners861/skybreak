@@ -922,7 +922,9 @@ engine.runRenderLoop(() => {
   }
   art.updateEffects(dt);
   updateSky(dt);
-  animateHero(dt, velocity.length(), grounded, !!attachedAnchor);
+  const wireOffset = attachedAnchor?.position.subtract(playerPosition);
+  const wireLean = wireOffset ? Math.atan2(wireOffset.x*Math.sin(player.rotation.y)+wireOffset.z*Math.cos(player.rotation.y), Math.max(.5,wireOffset.y)) : 0;
+  animateHero(dt, velocity.length(), grounded, !!attachedAnchor, wireLean);
   animateGiant(now / 1000, giantHp, weakpointFlash);
   weakpoint.setEnabled(giantHp > 0);
   weakpointRing.setEnabled(giantHp > 0);

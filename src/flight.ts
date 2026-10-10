@@ -31,15 +31,15 @@ export const attachToAnchor = (state: FlightState, anchor: FlightVec, cameraForw
   if (state.grounded) {
     const towardAnchor: FlightVec = [-offset[0], 0, -offset[2]];
     const forward = normalize(length(towardAnchor) > .1 ? towardAnchor : [cameraForward[0], 0, cameraForward[2]]);
-    state.velocity[0] += forward[0] * 12;
-    state.velocity[2] += forward[2] * 12;
+    state.velocity[0] += forward[0] * 8;
+    state.velocity[2] += forward[2] * 8;
     // Street-level recovery needs enough lift to leave the ground and steer.
     // Launch vertically first so a nearby facade does not cancel takeoff at once.
     if (state.position[1] <= 1.16) {
       state.velocity[0] = 0;
       state.velocity[2] = 0;
-      state.velocity[1] = Math.max(state.velocity[1], 28);
-    } else state.velocity[1] = Math.max(state.velocity[1], 8);
+      state.velocity[1] = Math.max(state.velocity[1], 18);
+    } else state.velocity[1] = Math.max(state.velocity[1], 6);
     state.grounded = false;
   }
 };
@@ -52,15 +52,15 @@ export const stepAttached = (state: FlightState, anchor: FlightVec, input: Fligh
   const tangent: FlightVec = [input[0] - radial[0] * tangentDot, input[1] - radial[1] * tangentDot, input[2] - radial[2] * tangentDot];
   // Preserve analogue input strength; do not turn a tiny joystick movement
   // (or an almost radial input) into full-strength tangential acceleration.
-  state.velocity[0] += tangent[0] * 28 * dt;
-  state.velocity[1] += tangent[1] * 28 * dt;
-  state.velocity[2] += tangent[2] * 28 * dt;
+  state.velocity[0] += tangent[0] * 16 * dt;
+  state.velocity[1] += tangent[1] * 16 * dt;
+  state.velocity[2] += tangent[2] * 16 * dt;
   if (boosting) {
     const boostSource = length(input) > 0.001 ? input : boostForward;
     const boostDirection = normalize([boostSource[0], Math.max(0, boostSource[1]), boostSource[2]]);
-    state.velocity[0] += boostDirection[0] * 34 * dt;
-    state.velocity[1] += boostDirection[1] * 34 * dt;
-    state.velocity[2] += boostDirection[2] * 34 * dt;
+    state.velocity[0] += boostDirection[0] * 24 * dt;
+    state.velocity[1] += boostDirection[1] * 24 * dt;
+    state.velocity[2] += boostDirection[2] * 24 * dt;
     // Boost is thrust, not an automatic winch: keep the captured rope length.
   }
   const speed = length(state.velocity);
@@ -92,16 +92,16 @@ export const stepAttached = (state: FlightState, anchor: FlightVec, input: Fligh
 export const releaseFlight = (state: FlightState): void => { state.attached = false; };
 
 export const stepDetached = (state: FlightState, input: FlightVec, dt: number, boosting: boolean, boostForward: FlightVec = [0, 0.35, 1], gravity = -18, maxSpeed = 42, integratePosition = true): void => {
-  const drag = Math.pow(0.997, dt * 60);
-  const steering = (boosting ? 18 : 15) * dt;
+  const drag = Math.pow(0.999, dt * 60);
+  const steering = (boosting ? 10 : 8) * dt;
   state.velocity[0] = state.velocity[0] * drag + input[0] * steering;
   state.velocity[2] = state.velocity[2] * drag + input[2] * steering;
   state.velocity[1] += gravity * dt;
   if (boosting) {
     const boostDirection = normalize([boostForward[0], Math.max(0, boostForward[1]), boostForward[2]]);
-    state.velocity[0] += boostDirection[0] * 26 * dt;
-    state.velocity[1] += boostDirection[1] * 26 * dt;
-    state.velocity[2] += boostDirection[2] * 26 * dt;
+    state.velocity[0] += boostDirection[0] * 20 * dt;
+    state.velocity[1] += boostDirection[1] * 20 * dt;
+    state.velocity[2] += boostDirection[2] * 20 * dt;
   }
   const speed = length(state.velocity);
   if (speed > maxSpeed) {

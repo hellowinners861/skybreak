@@ -136,16 +136,18 @@ export function characterModels(scene: Scene, paint: Paints) {
     }
     batchJoint(body);
     let phase=0;
-    return (dt:number,speed:number,grounded:boolean,attached:boolean) => {
+    return (dt:number,speed:number,grounded:boolean,attached:boolean,wireLean=0) => {
       phase+=dt*(4+speed*.25);const stride=Math.min(.7,speed*.055);
-      body.rotation.x=grounded?-.035:-.15; body.rotation.z=grounded?Math.sin(phase)*stride*.04:Math.sin(phase*.45)*.035;
+      const lean=grounded?-.035:attached?Math.max(-.3,Math.min(.3,wireLean*.45)):-.15;
+      body.rotation.x+=(lean-body.rotation.x)*(1-Math.exp(-6*dt));
+      body.rotation.z=grounded?Math.sin(phase)*stride*.04:attached?0:Math.sin(phase*.45)*.02;
       for(const {arm,elbow,leg,knee,side} of limbs){
         const walk=Math.sin(phase+(side<0?0:Math.PI));
         arm.rotation.x=grounded?walk*stride:(attached?-2.35:-1.0);
         arm.rotation.z=-side*(grounded?.12:.28);
         elbow.rotation.x=grounded?-.22:-.6;
         leg.rotation.x=grounded?-walk*stride:(side<0?.15:-.4);
-        knee.rotation.x=grounded?Math.max(0,walk)*stride:.75+(side<0?.2:0);
+        knee.rotation.x=grounded?Math.max(0,walk)*stride:attached?.28+(side<0?.08:0):.75+(side<0?.2:0);
       }
       for(let i=0;i<=segments;i++) {
         const t=i/segments,w=.105*(1-t*.48),x=Math.sin(phase*.7-t*5)*t*.16,y=.1*Math.sin(t*4+phase)*t;

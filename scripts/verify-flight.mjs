@@ -52,7 +52,7 @@ const verifyInvariants = () => {
   assert.ok(Math.abs(energyAfter - energyBefore) < 24, "neutral rope integration remains energy-stable");
   const launch = { position: [0, 1.15, 0], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
   flight.attachToAnchor(launch, anchors[0], [0, 0, 1]);
-  assert.ok(launch.velocity[1] >= 28 && !launch.grounded, "street attach lifts upward");
+  assert.ok(launch.velocity[1] >= 18 && !launch.grounded, "street attach lifts upward");
   assert.deepEqual(launch.velocity.slice(0,1).concat(launch.velocity.slice(2)),[0,0],"street takeoff avoids launching into a nearby wall");
   for(let i=0;i<60;i++) {
     const previous=[...launch.position];
@@ -60,7 +60,7 @@ const verifyInvariants = () => {
     resolveFlightCollision(launch,previous,[]);
     assert.equal(launch.grounded,false,"street recovery remains airborne");
   }
-  assert.ok(launch.position[1]>10,"street recovery gains height");
+  assert.ok(launch.position[1]>7,"street recovery gains height");
 
   const fixture = () => ({position:[0,25,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:20});
   const small=fixture(), full=fixture();
@@ -72,8 +72,14 @@ const verifyInvariants = () => {
     boosted.position=[0,45-rope,0];
     flight.stepAttached(boosted,[0,45,0],[0,0,0],1/120,true,1.15,[0,.5,1]);
     assert.equal(boosted.ropeLength,rope,"boost neither lengthens short ropes nor reels in long ones");
-    assert.ok(boosted.velocity[1]<34/120,"boost vertical acceleration is applied once");
+    assert.ok(boosted.velocity[1]<24/120,"boost vertical acceleration is applied once");
   }
+  const inertia={position:[0,10,0],velocity:[20,0,0],grounded:false,attached:true,ropeLength:20};
+  flight.stepAttached(inertia,[0,30,0],[-1,0,0],1/60,false);
+  assert.ok(inertia.velocity[0]>19.7,"opposite steering does not instantly cancel swing momentum");
+  const released={position:[0,20,0],velocity:[20,0,0],grounded:false,attached:false,ropeLength:20};
+  flight.stepDetached(released,[-1,0,0],1/60,false);
+  assert.ok(released.velocity[0]>19.8,"released body carries forward momentum against steering");
   const roof={x:0,z:0,halfX:10,halfZ:8,top:40};
   for(const attached of [false,true]) {
     const landing={position:[0,40.65,0],velocity:[2,-40,3],grounded:false,attached,ropeLength:25};
