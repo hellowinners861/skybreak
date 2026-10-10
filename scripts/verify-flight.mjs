@@ -9,8 +9,10 @@ const root = resolve(import.meta.dirname, "..");
 const output = resolve(root, ".artifacts", "flight-check");
 const require = createRequire(import.meta.url);
 mkdirSync(output, { recursive: true });
-execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), resolve(root, "src/flight.ts"), "--target", "ES2020", "--module", "ES2020", "--moduleResolution", "Bundler", "--outDir", output, "--skipLibCheck", "--pretty", "false"], { cwd: root, stdio: "inherit" });
+execFileSync(process.execPath, [require.resolve("typescript/bin/tsc"), resolve(root, "src/flight.ts"), resolve(root, "src/wire-targeting.ts"), resolve(root, "src/flight-collision.ts"), "--target", "ES2020", "--module", "ES2020", "--moduleResolution", "Bundler", "--outDir", output, "--skipLibCheck", "--pretty", "false"], { cwd: root, stdio: "inherit" });
 const flight = await import(pathToFileURL(resolve(output, "flight.js")).href);
+const { nearestVisibleWireTarget } = await import(pathToFileURL(resolve(output, "wire-targeting.js")).href);
+const { resolveFlightCollision } = await import(pathToFileURL(resolve(output, "flight-collision.js")).href);
 
 const anchors = flight.COURSE_ANCHORS;
 const distance = (a, b) => Math.hypot(a[0] - b[0], a[1] - b[1], a[2] - b[2]);
@@ -51,7 +53,38 @@ const verifyInvariants = () => {
   const launch = { position: [0, 1.15, 0], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
   flight.attachToAnchor(launch, anchors[0], [0, 0, 1]);
   assert.ok(launch.velocity[1] >= 8 && !launch.grounded, "ground attach launches upward");
+
+  const fixture = () => ({position:[0,25,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:20});
+  const small=fixture(), full=fixture();
+  flight.stepAttached(small,[0,45,0],[.1,0,0],1/120,false);
+  flight.stepAttached(full,[0,45,0],[1,0,0],1/120,false);
+  assert.ok(Math.abs(small.velocity[0]/full.velocity[0]-.1)<.001,"analogue steering scales with input");
+  for(const rope of [5,20]) {
+    const boosted=fixture();boosted.ropeLength=rope;
+    boosted.position=[0,45-rope,0];
+    flight.stepAttached(boosted,[0,45,0],[0,0,0],1/120,true,1.15,[0,.5,1]);
+    assert.equal(boosted.ropeLength,rope,"boost neither lengthens short ropes nor reels in long ones");
+    assert.ok(boosted.velocity[1]<34/120,"boost vertical acceleration is applied once");
+  }
+  const roof={x:0,z:0,halfX:10,halfZ:8,top:40};
+  for(const attached of [false,true]) {
+    const landing={position:[0,40.65,0],velocity:[2,-40,3],grounded:false,attached,ropeLength:25};
+    assert.ok(resolveFlightCollision(landing,[0,41.3,0],[roof]),"roof collision detected");
+    assert.deepEqual(landing.position,[0,41.15,0],"fast descent lands on the roof, not beside it");
+    assert.deepEqual(landing.velocity,[2,0,3],"landing keeps horizontal momentum");
+    assert.equal(landing.grounded,true);
+  }
+  const wall={position:[10.3,10,0],velocity:[-20,1,4],grounded:false,attached:true,ropeLength:25};
+  resolveFlightCollision(wall,[10.7,10,0],[roof]);
+  assert.ok(Math.abs(wall.position[0]-10.56)<1e-5,"wall separation");
+  assert.deepEqual(wall.velocity,[0,1,4],"wall hit removes only inward velocity");
 };
+
+const target=(name,distance,x=0,y=0,depth=10,blocked=false)=>({target:name,position:[distance,0,0],screenX:x,screenY:y,cameraDepth:depth,blocked});
+assert.equal(nearestVisibleWireTarget([target("centre",40),target("edge",10,.95,.9)], [0,0,0], .2).target,"edge","nearest point wins even at screen edge");
+assert.equal(nearestVisibleWireTarget([target("outside",2,1.01),target("behind",3,0,0,-1),target("wall",4,0,0,10,true),target("near-plane",5,0,0,.1),target("visible",25)], [0,0,0], .2).target,"visible","offscreen, behind, occluded and clipped anchors excluded");
+assert.equal(nearestVisibleWireTarget([target("far",99)], [0,0,0], .2),null,"98m range");
+assert.equal(nearestVisibleWireTarget([target("old",31),target("new",30.9,.8)], [0,0,0], .2).target,"new","no sticky previous target or centre bias");
 
 const simulate = (fps) => {
   const dt = 1 / fps;

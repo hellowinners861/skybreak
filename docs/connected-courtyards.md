@@ -43,6 +43,6 @@
 
 ## 公開先
 
-プレイ用URL： https://skybreak.hellowinners861.chatgpt.site
+プレイ用URL： https://hellowinners861.github.io/skybreak/
 
-この変更をmainへマージした後、そのソースから作成した本番ビルドをSitesへ配置します。GitHubのmainへのpushが自動でSitesへ反映される設定ではありません。以後の更新でもmainのビルドと公開が必要です。サイトは所有者限定で、所有者のChatGPTアカウントで利用します。
+GitHub Pagesへ公開します。mainへのpush後、GitHub Actionsで検証・ビルド・公開します。
