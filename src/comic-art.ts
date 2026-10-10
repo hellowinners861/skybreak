@@ -1,6 +1,7 @@
 import { characterModels } from "./character-models";
 import type { createBuildingFinishes } from "./building-finishes";
 import { decorateFacadeColumns, facadeColumns } from "./facade-trim";
+import type { GroundPatch } from "./city-landscape-plan";
 import { HORIZON } from "./city-environment";
 import { Color3, DynamicTexture, Material, Mesh, MeshBuilder, Scene, ShaderMaterial, StandardMaterial, TransformNode, Vector3 } from "@babylonjs/core";
 
@@ -74,14 +75,14 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
     mesh.position.set(...pos); mesh.material = mat; mesh.isPickable = false;
     return mesh;
   };
-  const rounded = (name: string, scale: [number, number, number], pos: [number, number, number], mat: Material) => {
-    const mesh = MeshBuilder.CreateSphere(name, { diameter: 2, segments: 10 }, scene);
+  const rounded = (name: string, scale: [number, number, number], pos: [number, number, number], mat: Material, segments = 10) => {
+    const mesh = MeshBuilder.CreateSphere(name, { diameter: 2, segments }, scene);
     mesh.scaling.set(...scale); mesh.position.set(...pos); mesh.material=mat; mesh.isPickable=false;
     const list=batches.get(mat)??[]; list.push(mesh); batches.set(mat,list);
     return mesh;
   };
 
-  const decorateCity = (lots: CityLot[]) => {
+  const decorateCity = (lots: CityLot[], groundPatches: GroundPatch[] = []) => {
     lots.forEach(([x, z, hx, hz, h], i) => {
       const finish = finishes[i % 3];
       // Architectural families share their trim, glazing, roof and service metal.
@@ -141,7 +142,10 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       box("entry-steps", [2.2,.25,.85], [x,.2,z-hz-.7], stone,undefined,true);
       // Props remain beside lots, away from the central wire course.
       for(const side of [-1,1]) {
-        const tx=x+side*(hx+1.2), tz=z-hz+2;
+        // Reuse four of the existing trees in the rear park; no extra crowns.
+        const parkTree = i >= 16 && i < 20 && side === 1;
+        const tx = parkTree ? [-70,-41,41,70][i-16] : x+side*(hx+1.2);
+        const tz = parkTree ? 103 : z-hz+2;
         box("tree-trunk", [.35,3.2,.35], [tx,1.7,tz], ink,undefined,true);
         rounded("tree-crown", [1.55,2.1,1.45], [tx,4.2,tz], foliage);
         rounded("tree-crown-light", [1.2,1.5,1.15], [tx-.45,5,tz-.25], foliageLight);
@@ -169,6 +173,18 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       box("antenna", [.18, 4, .18], [x + hx / 2, h + 2.3, z - hz / 2], ink, undefined, true);
       if (i % 4 === 0) sign(["AIR POST", "SKY PORT", "NORTH 01", "UP / UP", "FLY CLUB"][i / 4], [x, h - 2, z - hz - .3], hx * 1.6, 2, COMIC.yellow);
     });
+    // Restrained, knee-high planting; all clumps fit inside clipped garden beds.
+    // Keep decorative planting out of the road, doors and course support bases.
+    for (const {rect: [x0,z0,x1,z1],finish,place} of groundPatches) {
+      if (finish !== "grass" || !["shared-court","central-garden","launch-garden"].includes(place)) continue;
+      const w=x1-x0, d=z1-z0;
+      if(w<1.1 || d<3) continue;
+      const width=Math.min(w-.5,1.3), depth=Math.min(d-.8,8);
+      for (let c=0;c<3;c++) {
+        const z=(z0+z1)/2+(c-1)*depth/3;
+        rounded("garden-shrub",[width*.48,.31,depth/6],[x0+.25+width/2,.46,z],foliage,6);
+      }
+    }
     // Skyline outside the playable bounds, with a deliberately softer contrast.
     for (let layer=0;layer<2;layer++) for (let i=0;i<36;i++) {
       const angle=i/36*Math.PI*2;

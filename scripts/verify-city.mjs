@@ -22,6 +22,7 @@ execFileSync(
     require.resolve("typescript/bin/tsc"),
     resolve(root, "src/city-environment.ts"),
     resolve(root, "src/chamfered-trim.ts"),
+    resolve(root, "src/city-landscape-plan.ts"),
     "--target",
     "ES2020",
     "--module",
@@ -42,6 +43,34 @@ const { createBuildingShell } = await import(
 const { createChamferedTrim } = await import(
   pathToFileURL(resolve(output, "chamfered-trim.js")).href
 );
+const { planCityLandscape, subtractGround, GROUND_BOUNDS } = await import(
+  pathToFileURL(resolve(output, "city-landscape-plan.js")).href
+);
+// Independent area accounting catches holes and double-covered parcels, even
+// when exclusions overlap or cross the city boundary.
+const area = r => (r[2]-r[0])*(r[3]-r[1]);
+const overlap = (a,b) => Math.min(a[2],b[2])-Math.max(a[0],b[0])>1e-7 && Math.min(a[3],b[3])-Math.max(a[1],b[1])>1e-7;
+for (const occupied of [[], [[-4,-120,4,120],[-120,-4,120,4]], [[-22,-96,22,-80],[-4,-120,4,120],[-28,-41,-24,-35],[24,-65,28,-59],[-130,50,-85,130]]]) {
+  const {patches,benches}=planCityLandscape(occupied);
+  for(let i=0;i<patches.length;i++) {
+    const r=patches[i].rect;
+    assert.ok(r.every(Number.isFinite) && area(r)>0,"valid parcel");
+    assert.ok(r[0]>=-120 && r[1]>=-120 && r[2]<=120 && r[3]<=120,"inside city");
+    assert.ok(occupied.every(o=>!overlap(r,o)),"no paving or lawn inside reserved areas");
+    for(let j=0;j<i;j++) assert.ok(!overlap(r,patches[j].rect),"no coplanar overlaps");
+  }
+  const xs=[...new Set([-120,120,...occupied.flatMap(r=>[r[0],r[2]]).map(x=>Math.max(-120,Math.min(120,x)))])].sort((a,b)=>a-b);
+  const zs=[...new Set([-120,120,...occupied.flatMap(r=>[r[1],r[3]]).map(z=>Math.max(-120,Math.min(120,z)))])].sort((a,b)=>a-b);
+  let free=0;
+  for(let i=0;i<xs.length-1;i++)for(let j=0;j<zs.length-1;j++) {
+    const x=(xs[i]+xs[i+1])/2,z=(zs[j]+zs[j+1])/2;
+    if(!occupied.some(r=>x>r[0]&&x<r[2]&&z>r[1]&&z<r[3])) free+=(xs[i+1]-xs[i])*(zs[j+1]-zs[j]);
+  }
+  assert.ok(Math.abs(patches.reduce((sum,p)=>sum+area(p.rect),0)-free)<1e-5,"all uncovered land has a finish");
+  assert.equal(benches.length,4,"bounded furnishing count");
+}
+assert.deepEqual(subtractGround(GROUND_BOUNDS,GROUND_BOUNDS),[],"fully covered parcel disappears");
+console.log("landscape verification: PASS (coverage, reserved footprints, overlaps, bounds, overlapping exclusions)");
 const engine = new NullEngine();
 const scene = new Scene(engine);
 try {

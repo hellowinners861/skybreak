@@ -145,7 +145,13 @@ const buildingLayouts: Array<[number, number, number, number, number]> = [
   [-62, 72, 13, 9, 20], [-30, 72, 10, 11, 15], [30, 72, 10, 11, 24], [62, 72, 12, 10, 24],
 ];
 
-createCityStreets(scene, buildingLayouts);
+const cityStreets = createCityStreets(scene, buildingLayouts, [
+  [-22, -96, 22, -80], // Launch building is not part of the repeating lots.
+  ...COURSE_ANCHORS.map(([x, , z]): [number, number, number, number] => {
+    const supportX = x >= 0 ? 26 : -26;
+    return [supportX - 2, z - 3, supportX + 2, z + 3];
+  }),
+]);
 
 for (let index = 0; index < buildingLayouts.length; index += 1) {
   const [x, z, halfX, halfZ, height] = buildingLayouts[index];
@@ -191,7 +197,7 @@ const giantRoot = new TransformNode("giant-root", scene);
 giantRoot.position = new Vector3(15, 0, 48);
 
 const animateGiant = art.createGiant(giantRoot);
-art.decorateCity(buildingLayouts);
+art.decorateCity(buildingLayouts, cityStreets.landscape.patches);
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
 const staticLots = buildings.map(({ mesh }) => mesh);

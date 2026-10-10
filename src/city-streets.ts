@@ -9,6 +9,8 @@ import {
   VertexBuffer,
 } from "@babylonjs/core";
 import type { CityLot } from "./comic-art";
+import { planCityLandscape, type GroundRect } from "./city-landscape-plan";
+import lawnUrl from "./assets/landscape/sage-lawn.webp";
 import blueUrl from "./assets/streets/asphalt-blue.webp";
 import warmUrl from "./assets/streets/asphalt-warm.webp";
 import charcoalUrl from "./assets/streets/asphalt-charcoal.webp";
@@ -16,7 +18,7 @@ import creamUrl from "./assets/streets/sidewalk-cream.webp";
 import slateUrl from "./assets/streets/sidewalk-slate.webp";
 import brickUrl from "./assets/streets/sidewalk-brick.webp";
 
-export function createCityStreets(scene: Scene, lots: CityLot[]) {
+export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints: GroundRect[] = []) {
   const textured = (name: string, url: string, metres: number) => {
     const texture = new Texture(
       url,
@@ -55,6 +57,7 @@ export function createCityStreets(scene: Scene, lots: CityLot[]) {
   };
   const curb = solid("street-curb", "#b5b3a5");
   const marking = solid("street-marking", "#f3e9cf");
+  const lawn = textured("sage-lawn", lawnUrl, 4);
   const batches = new Map<Material, Mesh[]>();
   const slab = (
     name: string,
@@ -269,6 +272,24 @@ export function createCityStreets(scene: Scene, lots: CityLot[]) {
         marking,
       );
     }
+  const buildingRects: GroundRect[] = lots.map(([x,z,hx,hz]) => [x-hx,z-hz,x+hx,z+hz]);
+  const landscape = planCityLandscape([...roadRects, ...paved, ...buildingRects, ...extraFootprints]);
+  for (const {rect: [left,bottom,right,top],finish} of landscape.patches) {
+    const material = finish === "grass" ? lawn : finish === "edge" ? curb : sidewalks[finish === "slate" ? 1 : 2];
+    const surface = finish === "grass" ? .145 : finish === "edge" ? .205 : .18;
+    slab(`landscape-${finish}`, (left+right)/2, (bottom+top)/2, right-left, top-bottom, surface, .08, material);
+  }
+  // Four quiet seating spots, at the edges rather than in the flight corridor.
+  const benchSeat = scene.getMaterialByName("city-stone")!;
+  const benchFrame = scene.getMaterialByName("comic-ink")!;
+  for (const {x,z,alongZ} of landscape.benches) {
+    const piece = (dx: number,dz: number,w: number,d: number,y: number,h: number,mat: Material) =>
+      slab("garden-bench", x+(alongZ?dz:dx), z+(alongZ?dx:dz), alongZ?d:w, alongZ?w:d, y, h, mat);
+    for (const side of [-1,1]) piece(side*.9,0,.16,.62,.59,.4,benchFrame);
+    for (let i=0;i<3;i++) piece(0,-.23+i*.23,2.5,.18,.69,.12,benchSeat);
+    piece(0,.33,2.5,.12,1.12,.28,benchSeat);
+    for (const side of [-1,1]) piece(side*1.02,.31,.1,.1,1.12,.5,benchFrame);
+  }
   const meshes: Mesh[] = [];
   for (const [material, group] of batches) {
     const merged = Mesh.MergeMeshes(group, true, true);
@@ -280,5 +301,5 @@ export function createCityStreets(scene: Scene, lots: CityLot[]) {
     merged.freezeWorldMatrix();
     meshes.push(merged);
   }
-  return { meshes, asphalt, sidewalks };
+  return { meshes, asphalt, sidewalks, landscape };
 }
