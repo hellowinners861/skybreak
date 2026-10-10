@@ -5,6 +5,7 @@ import {
   Engine,
   HemisphericLight,
   LinesMesh,
+  Material,
   Mesh,
   MeshBuilder,
   Scene,
@@ -19,6 +20,7 @@ import { collectCoin, createProgressState, isStageClear, resetProgress, tickAtta
 import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
 import { COMIC, createComicArt } from "./comic-art";
 import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
+import { createWallMaterials } from "./wall-materials";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -142,7 +144,7 @@ roadB.receiveShadows = true;
 
 const buildings: Building[] = [];
 const anchors: Anchor[] = [];
-const buildingPalette = [COMIC.cream, "#83aec6", "#4c7ebb", COMIC.blue, "#edb9a1"];
+const wallMaterials = createWallMaterials(scene);
 const buildingLayouts: Array<[number, number, number, number, number]> = [
   [-62, -72, 9, 8, 14], [-38, -72, 10, 8, 21], [38, -72, 10, 8, 17], [62, -72, 9, 8, 25],
   [-70, -40, 12, 9, 18], [-42, -40, 9, 11, 27], [42, -40, 12, 10, 21], [70, -40, 10, 8, 13],
@@ -155,7 +157,7 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   const [x, z, halfX, halfZ, height] = buildingLayouts[index];
   const building = createBuildingShell(`building-${index + 1}`, halfX, halfZ, height, index, scene);
   building.position = new Vector3(x, 0, z);
-  building.material = material(`building-mat-${index + 1}`, buildingPalette[index % buildingPalette.length]);
+  building.material = wallMaterials[index % wallMaterials.length];
 
   const roof = MeshBuilder.CreateBox(`roof-${index + 1}`, {
     width: halfX * 2 + 0.45,
@@ -174,18 +176,19 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   buildings.push({ mesh: building, x, z, halfX, halfZ, top: height });
 }
 
-const openingRoof = MeshBuilder.CreateBox("opening-roof", { width: 44, height: 40, depth: 16 }, scene);
-openingRoof.position = new Vector3(0, 20, -88);
-openingRoof.material = material("launch-roof", COMIC.blue);
+const openingRoof = createBuildingShell("opening-roof", 22, 8, 40, 1, scene);
+openingRoof.position = new Vector3(0, 0, -88);
+openingRoof.material = wallMaterials[1];
 buildings.push({ mesh: openingRoof, x: 0, z: -88, halfX: 22, halfZ: 8, top: 40 });
 
 const courseAnchorPositions = COURSE_ANCHORS.map(([x, y, z]) => new Vector3(x, y, z));
+const courseSupportMaterial = material("course-support-material", COMIC.blue);
 for (let index = 0; index < courseAnchorPositions.length; index += 1) {
   const point = courseAnchorPositions[index];
   const supportX = point.x >= 0 ? 26 : -26;
   const support = MeshBuilder.CreateBox(`course-support-${index + 1}`, { width: 4, height: point.y - 2, depth: 6 }, scene);
   support.position = new Vector3(supportX, (point.y - 2) / 2, point.z);
-  support.material = material(`course-support-material-${index + 1}`, COMIC.blue);
+  support.material = courseSupportMaterial;
   buildings.push({ mesh: support, x: supportX, z: point.z, halfX: 2, halfZ: 3, top: point.y - 2 });
   const anchorMesh = MeshBuilder.CreateSphere(`course-anchor-${index + 1}`, { diameter: 1.8, segments: 10 }, scene);
   anchorMesh.position = point.clone();
@@ -202,7 +205,24 @@ art.decorateCity(buildingLayouts);
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
 const staticLots = buildings.map(({ mesh }) => mesh);
-const cityShells = Mesh.MergeMeshes(staticLots, true, true, undefined, false, true);
+const shellGroups = new Map<Material, Mesh[]>();
+for (const mesh of staticLots) {
+  if (!mesh.material) throw new Error(`City shell has no material: ${mesh.name}`);
+  const group = shellGroups.get(mesh.material) ?? [];
+  group.push(mesh);
+  shellGroups.set(mesh.material, group);
+}
+const cityShells: Mesh[] = [];
+for (const [paint, meshes] of shellGroups) {
+  const merged = Mesh.MergeMeshes(meshes, true, true);
+  if (merged) {
+    merged.name = `city-shell-${paint.name}`;
+    merged.isPickable = false;
+    merged.receiveShadows = true;
+    merged.freezeWorldMatrix();
+    cityShells.push(merged);
+  }
+}
 const staticRoofs = scene.meshes.filter(mesh => /^roof-\d+$/.test(mesh.name)) as Mesh[];
 const cityRoofs = Mesh.MergeMeshes(staticRoofs, true, true);
 // Static sun shadows render once, keeping city depth affordable on mobile.
@@ -212,7 +232,7 @@ cityShadows.filteringQuality = ShadowGenerator.QUALITY_LOW;
 cityShadows.setDarkness(.3);
 cityShadows.bias = .003;
 cityShadows.normalBias = .05;
-if (cityShells) cityShadows.addShadowCaster(cityShells);
+for (const mesh of cityShells) cityShadows.addShadowCaster(mesh);
 if (cityRoofs) cityShadows.addShadowCaster(cityRoofs);
 for (const mesh of scene.meshes) {
   if (mesh.name === "city-batch-city-sage" || mesh.name === "city-batch-city-leaf") cityShadows.addShadowCaster(mesh);
