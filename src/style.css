@@ -4,7 +4,8 @@
   --ink: #17243d; --blue: #2459c4; --paper: #fff1d2; --red: #ef493d; --yellow: #ffd24b;
 }
 * { box-sizing: border-box; }
-html, body, #game-shell { width: 100%; height: 100%; margin: 0; overflow: hidden; }
+/* Disable double-tap zoom across the game, including HUD and retry buttons. */
+html, body, #game-shell { width: 100%; height: 100%; margin: 0; overflow: hidden; touch-action: manipulation; }
 body { background: #a7d9ec; }
 button { font: inherit; color: inherit; cursor: pointer; }
 button:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
