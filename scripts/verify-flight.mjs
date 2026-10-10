@@ -52,7 +52,15 @@ const verifyInvariants = () => {
   assert.ok(Math.abs(energyAfter - energyBefore) < 24, "neutral rope integration remains energy-stable");
   const launch = { position: [0, 1.15, 0], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
   flight.attachToAnchor(launch, anchors[0], [0, 0, 1]);
-  assert.ok(launch.velocity[1] >= 8 && !launch.grounded, "ground attach launches upward");
+  assert.ok(launch.velocity[1] >= 18 && !launch.grounded, "street attach lifts upward");
+  assert.deepEqual(launch.velocity.slice(0,1).concat(launch.velocity.slice(2)),[0,0],"street takeoff avoids launching into a nearby wall");
+  for(let i=0;i<60;i++) {
+    const previous=[...launch.position];
+    flight.stepAttached(launch,anchors[0],[0,0,0],1/120,false,-Infinity);
+    resolveFlightCollision(launch,previous,[]);
+    assert.equal(launch.grounded,false,"street recovery remains airborne");
+  }
+  assert.ok(launch.position[1]>7,"street recovery gains height");
 
   const fixture = () => ({position:[0,25,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:20});
   const small=fixture(), full=fixture();
@@ -64,8 +72,14 @@ const verifyInvariants = () => {
     boosted.position=[0,45-rope,0];
     flight.stepAttached(boosted,[0,45,0],[0,0,0],1/120,true,1.15,[0,.5,1]);
     assert.equal(boosted.ropeLength,rope,"boost neither lengthens short ropes nor reels in long ones");
-    assert.ok(boosted.velocity[1]<34/120,"boost vertical acceleration is applied once");
+    assert.ok(boosted.velocity[1]<24/120,"boost vertical acceleration is applied once");
   }
+  const inertia={position:[0,10,0],velocity:[20,0,0],grounded:false,attached:true,ropeLength:20};
+  flight.stepAttached(inertia,[0,30,0],[-1,0,0],1/60,false);
+  assert.ok(inertia.velocity[0]>19.7,"opposite steering does not instantly cancel swing momentum");
+  const released={position:[0,20,0],velocity:[20,0,0],grounded:false,attached:false,ropeLength:20};
+  flight.stepDetached(released,[-1,0,0],1/60,false);
+  assert.ok(released.velocity[0]>19.8,"released body carries forward momentum against steering");
   const roof={x:0,z:0,halfX:10,halfZ:8,top:40};
   for(const attached of [false,true]) {
     const landing={position:[0,40.65,0],velocity:[2,-40,3],grounded:false,attached,ropeLength:25};
@@ -83,7 +97,8 @@ const verifyInvariants = () => {
 const target=(name,distance,x=0,y=0,depth=10,blocked=false)=>({target:name,position:[distance,0,0],screenX:x,screenY:y,cameraDepth:depth,blocked});
 assert.equal(nearestVisibleWireTarget([target("centre",40),target("edge",10,.95,.9)], [0,0,0], .2).target,"edge","nearest point wins even at screen edge");
 assert.equal(nearestVisibleWireTarget([target("outside",2,1.01),target("behind",3,0,0,-1),target("wall",4,0,0,10,true),target("near-plane",5,0,0,.1),target("visible",25)], [0,0,0], .2).target,"visible","offscreen, behind, occluded and clipped anchors excluded");
-assert.equal(nearestVisibleWireTarget([target("far",99)], [0,0,0], .2),null,"98m range");
+assert.equal(nearestVisibleWireTarget([target("far",200)], [0,1.15,0], .2).target,"far","street-level visible hooks have no range cap");
+assert.equal(nearestVisibleWireTarget([target("far",99)], [0,0,0], .2,98),null,"optional explicit range remains supported");
 assert.equal(nearestVisibleWireTarget([target("old",31),target("new",30.9,.8)], [0,0,0], .2).target,"new","no sticky previous target or centre bias");
 
 const simulate = (fps) => {

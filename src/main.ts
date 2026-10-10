@@ -465,7 +465,7 @@ const findCandidate = (): void => {
     candidates.push({
       target: anchor, position: [anchor.position.x, anchor.position.y, anchor.position.z],
       screenX, screenY, cameraDepth: depth,
-      blocked: segmentBlocked(camera.position, anchor.position) || segmentBlocked(playerPosition, anchor.position),
+      blocked: segmentBlocked(camera.position, anchor.position),
     });
   }
   const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ);
@@ -643,7 +643,7 @@ const updateHud = (): void => {
     anchorReadout.textContent = `◎ 最寄り ${candidateAnchor.name} / ${Math.round(candidateDistance)}m`;
     wireLabel.textContent = "WIRE";
   } else {
-    anchorReadout.textContent = "画面内のフックに近づこう（98m以内）";
+    anchorReadout.textContent = "カメラを動かして黄色い球を画面に入れよう";
     wireLabel.textContent = "WIRE";
   }
 };
@@ -653,8 +653,13 @@ const updateCamera = (dt: number, now: number): void => {
   const focus = playerPosition.add(new Vector3(0, 2.05, 0));
   let wantedPosition = focus.subtract(forward.scale(14));
   if (segmentBlocked(focus, wantedPosition)) wantedPosition = focus.subtract(forward.scale(5.8));
+  // Looking up from the street must not put the orbit camera under the ground.
+  // Lift its aim by the same amount to preserve the requested upward view.
+  const groundLift = Math.max(0, 1.5 - wantedPosition.y);
+  wantedPosition.y += groundLift;
   camera.position = Vector3.Lerp(camera.position, wantedPosition, clamp(dt * 7.5, 0, 1));
-  camera.setTarget(focus);
+  camera.position.y = Math.max(1.5, camera.position.y);
+  camera.setTarget(focus.add(new Vector3(0, groundLift, 0)));
 };
 
 const updateCandidateMarker = (dt: number): void => {
@@ -674,7 +679,8 @@ const updatePhysicsStep = (dt: number): void => {
   boostTimer = Math.max(0, boostTimer - dt);
   boostCooldown = Math.max(0, boostCooldown - dt);
   if (boostTimer <= 0) boosting = false;
-  if (attachedAnchor && segmentBlocked(playerPosition, attachedAnchor.position, attachedAnchor)) detachWire(true);
+  // Visibility is decided from the camera. Player collisions handle contact;
+  // a different player-to-hook sightline must not immediately cancel a visible hook.
   const movement = getMovement();
   const previous: [number, number, number] = [playerPosition.x, playerPosition.y, playerPosition.z];
   flightState.position = [...previous];
@@ -916,7 +922,9 @@ engine.runRenderLoop(() => {
   }
   art.updateEffects(dt);
   updateSky(dt);
-  animateHero(dt, velocity.length(), grounded, !!attachedAnchor);
+  const wireOffset = attachedAnchor?.position.subtract(playerPosition);
+  const wireLean = wireOffset ? Math.atan2(wireOffset.x*Math.sin(player.rotation.y)+wireOffset.z*Math.cos(player.rotation.y), Math.max(.5,wireOffset.y)) : 0;
+  animateHero(dt, velocity.length(), grounded, !!attachedAnchor, wireLean);
   animateGiant(now / 1000, giantHp, weakpointFlash);
   weakpoint.setEnabled(giantHp > 0);
   weakpointRing.setEnabled(giantHp > 0);
