@@ -1,5 +1,6 @@
 import { characterModels } from "./character-models";
 import type { createBuildingFinishes } from "./building-finishes";
+import { decorateFacadeColumns, facadeColumns } from "./facade-trim";
 import { HORIZON } from "./city-environment";
 import { Color3, DynamicTexture, Material, Mesh, MeshBuilder, Scene, ShaderMaterial, StandardMaterial, TransformNode, Vector3 } from "@babylonjs/core";
 
@@ -90,9 +91,10 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       }
       const residential = i % 3 === 0;
       const modern = i % 3 === 1;
+      decorateFacadeColumns(scene, [x,z,hx,hz,h], i, finishes, (mesh, mat) => { const group=batches.get(mat)??[];group.push(mesh);batches.set(mat,group); });
       for (let y = 6; y < h - 1; y += 4) {
         if (!modern) box(`floor-${i}`, [hx * 2 + .1, .18, hz * 2 + .1], [x, y - 1.35, z], finish.trim, undefined, true);
-        for (let column = -hx + 2; column < hx - 1; column += 3.5) {
+        for (const column of facadeColumns(hx, modern ? 2.5 : 3.2)) {
           for (const face of [-1, 1]) {
             box("window-frame", [modern ? 2.5 : 1.95, 2.3, .12], [x + column, y, z + face * (hz + .06)], finish.frame, undefined, true);
             box("window", [modern ? 2.3 : 1.5, 1.95, .14], [x + column, y, z + face * (hz + .13)], finish.glass, undefined, true);
@@ -105,7 +107,7 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
             }
           }
         }
-        for (let column = -hz + 2; column < hz - 1; column += 3.5) {
+        for (const column of facadeColumns(hz, modern ? 2.5 : 3.2)) {
           for (const face of [-1, 1]) {
             box("side-window", [.12, 2.1, 1.65], [x + face * (hx + .07), y, z + column], finish.frame, undefined, true);
             box("side-glass", [.14, 1.85, 1.35], [x + face * (hx + .14), y, z + column], finish.glass, undefined, true);
@@ -116,7 +118,6 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       }
       // Each family owns a different facade rhythm and crown rather than random ornaments.
       for (const edge of [-1,1]) {
-        box("corner-pier", [.65,h-.4,.38], [x+edge*(hx-1.6),h/2,z-hz-.2], finish.trim, undefined,true);
         box("roof-parapet", [hx*2,.7,.25], [x,h+.65,z+edge*(hz-.1)], finish.trim,undefined,true);
       }
       for (const edge of [-1,1]) {
@@ -125,7 +126,6 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
         box("side-parapet-cap", [.42,.12,hz*2+.15], [x+edge*(hx-.1),h+1.05,z], finish.metal,undefined,true);
       }
       if (modern) {
-        for(let c=-hx+3;c<hx-1;c+=3.5) box("vertical-fin", [.22,h-4,.5], [x+c,(h+4)/2,z-hz-.22], finish.metal,undefined,true);
         box("recessed-crown", [hx*1.45,2.4,hz*.65], [x,h+1.5,z+hz*.55], finish.glass,undefined,true);
         box("crown-canopy", [hx*1.5,.28,hz*.7], [x,h+2.84,z+hz*.55], finish.trim,undefined,true);
       }
