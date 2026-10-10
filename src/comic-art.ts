@@ -140,7 +140,6 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       box("door-pane", [.95,1.7,.24], [x,1.7,z-hz-.44], finish.glass,undefined,true);
       box("entry-steps", [2.2,.25,.85], [x,.2,z-hz-.7], stone,undefined,true);
       // Props remain beside lots, away from the central wire course.
-      box("sidewalk", [hx*2+3,.12,hz*2+3], [x,.09,z], stone,undefined,true);
       for(const side of [-1,1]) {
         const tx=x+side*(hx+1.2), tz=z-hz+2;
         box("tree-trunk", [.35,3.2,.35], [tx,1.7,tz], ink,undefined,true);
@@ -181,8 +180,6 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       if(i%3===0) box("skyline-spire", [1.2,9,1.2], [x,height+2,z],mat,undefined,true);
       if(layer===1 && i%3===0) rounded("distant-ridge", [48,12+i%5*3,24], [x,-5,z],hill);
     }
-    for (let z = -110; z < 115; z += 12) box("road-dash", [.35, .04, 4], [0, .16, z], cream, undefined, true);
-    for (let x = -110; x < 115; x += 12) box("road-dash", [4, .04, .35], [x, .16, 0], cream, undefined, true);
     // Dress the launch hub too: its 40m wall otherwise dominates the street view.
     for (let y=4;y<39;y+=5) {
       for (const side of [-1,1]) {
