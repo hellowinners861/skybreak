@@ -1,0 +1,5 @@
+{
+  "tool": "Built-in image_gen",
+  "asset": "src/assets/landscape/sage-lawn.webp",
+  "prompt": "Use case: stylized-concept. Asset type: tileable diffuse/albedo lawn texture for SKYBREAK, a polished comic-style 3D city mobile game. Generate one square seamless grass texture, full-bleed orthographic directly overhead, covering approximately 4x4 metres of closely mown urban lawn. Muted sage and olive green, middle value around #74966b, subtle warm green variation, small softly painted clusters with sparse tiny blade strokes. Cohesive painterly comic art, restrained contrast, quiet smooth large-scale reading from the air. Uniform lighting with no directional cast shadows, no perspective, no objects, flowers, paths, edging, stones, soil patches, text, borders or gradients. Opposite edges must tile seamlessly. Avoid photographic noisy grass, neon green and conspicuous repeated features. 1024x1024."
+}
