@@ -1,4 +1,5 @@
 import { characterModels } from "./character-models";
+import type { createBuildingFinishes } from "./building-finishes";
 import { HORIZON } from "./city-environment";
 import { Color3, DynamicTexture, Material, Mesh, MeshBuilder, Scene, ShaderMaterial, StandardMaterial, TransformNode, Vector3 } from "@babylonjs/core";
 
@@ -21,7 +22,7 @@ void main() {
   gl_FragColor = vec4(mix(paperColor * band, hazeColor, haze), 1.0);
 }`;
 
-export function createComicArt(scene: Scene) {
+export function createComicArt(scene: Scene, finishes: ReturnType<typeof createBuildingFinishes>) {
   const paint = (name: string, color: string) => {
     const mat = new ShaderMaterial(name, scene, { vertexSource: celVertex, fragmentSource: celFragment }, {
       attributes: ["position", "normal"], uniforms: ["worldViewProjection", "world", "paperColor", "eyePosition", "hazeColor"],
@@ -81,48 +82,62 @@ export function createComicArt(scene: Scene) {
 
   const decorateCity = (lots: CityLot[]) => {
     lots.forEach(([x, z, hx, hz, h], i) => {
-      // A dark top cornice and cream floor bands give the boxes an architectural scale.
-      box(`cornice-${i}`, [hx * 2 + .65, .5, hz * 2 + .65], [x, h + .4, z], ink, undefined, true);
+      const finish = finishes[i % 3];
+      // Architectural families share their trim, glazing, roof and service metal.
+      for (const edge of [-1,1]) {
+        box(`cornice-${i}`, [hx*2+.65,.35,.45], [x,h+.4,z+edge*hz], finish.trim,undefined,true);
+        box(`side-cornice-${i}`, [.45,.35,hz*2+.65], [x+edge*hx,h+.4,z], finish.trim,undefined,true);
+      }
       const residential = i % 3 === 0;
       const modern = i % 3 === 1;
       for (let y = 6; y < h - 1; y += 4) {
-        if (!modern) box(`floor-${i}`, [hx * 2 + .1, .18, hz * 2 + .1], [x, y - 1.35, z], residential ? stone : cream, undefined, true);
+        if (!modern) box(`floor-${i}`, [hx * 2 + .1, .18, hz * 2 + .1], [x, y - 1.35, z], finish.trim, undefined, true);
         for (let column = -hx + 2; column < hx - 1; column += 3.5) {
           for (const face of [-1, 1]) {
-            box("window-frame", [1.95, 2.3, .12], [x + column, y, z + face * (hz + .06)], ink, undefined, true);
-            box("window", [1.5, 1.75, .14], [x + column, y, z + face * (hz + .13)], (i + Math.round(column)) % 3 === 0 ? cream : glass, undefined, true);
+            box("window-frame", [modern ? 2.5 : 1.95, 2.3, .12], [x + column, y, z + face * (hz + .06)], finish.frame, undefined, true);
+            box("window", [modern ? 2.3 : 1.5, 1.95, .14], [x + column, y, z + face * (hz + .13)], finish.glass, undefined, true);
+            box("window-mullion", [modern ? .06 : .08,1.95,.07], [x+column,y,z+face*(hz+.23)], finish.frame, undefined,true);
+            if (!modern) box("window-sill", [2.18,.14,.38], [x+column,y-1.15,z+face*(hz+.2)], finish.trim,undefined,true);
             if (residential && y < h-4 && Math.round(column)%2===0) {
-              box("balcony-slab", [2.4,.18,1.1], [x+column,y-1.25,z+face*(hz+.5)], stone, undefined,true);
-              box("balcony-rail", [2.4,.65,.1], [x+column,y-.85,z+face*(hz+1)], ink, undefined,true);
+              box("balcony-slab", [2.4,.18,1.1], [x+column,y-1.25,z+face*(hz+.5)], finish.trim, undefined,true);
+              box("balcony-rail", [2.4,.08,.1], [x+column,y-.55,z+face*(hz+1)], finish.metal, undefined,true);
+              for(const offset of [-1,-.5,0,.5,1]) box("balcony-spindle", [.07,.65,.07], [x+column+offset,y-.85,z+face*(hz+1)], finish.metal,undefined,true);
             }
           }
         }
         for (let column = -hz + 2; column < hz - 1; column += 3.5) {
           for (const face of [-1, 1]) {
-            box("side-window", [.12, 2.1, 1.65], [x + face * (hx + .07), y, z + column], ink, undefined, true);
-            box("side-glass", [.14, 1.65, 1.2], [x + face * (hx + .14), y, z + column], glass, undefined, true);
+            box("side-window", [.12, 2.1, 1.65], [x + face * (hx + .07), y, z + column], finish.frame, undefined, true);
+            box("side-glass", [.14, 1.85, 1.35], [x + face * (hx + .14), y, z + column], finish.glass, undefined, true);
+            box("side-mullion", [.07,1.85,.08], [x+face*(hx+.23),y,z+column], finish.frame,undefined,true);
+            if (!modern) box("side-sill", [.38,.14,1.95], [x+face*(hx+.2),y-1.05,z+column], finish.trim,undefined,true);
           }
         }
       }
       // Each family owns a different facade rhythm and crown rather than random ornaments.
       for (const edge of [-1,1]) {
-        box("corner-pier", [.65,h-.4,.38], [x+edge*(hx-1.6),h/2,z-hz-.2], modern ? blue : stone, undefined,true);
-        box("roof-parapet", [hx*2,.7,.25], [x,h+.65,z+edge*(hz-.1)], stone,undefined,true);
+        box("corner-pier", [.65,h-.4,.38], [x+edge*(hx-1.6),h/2,z-hz-.2], finish.trim, undefined,true);
+        box("roof-parapet", [hx*2,.7,.25], [x,h+.65,z+edge*(hz-.1)], finish.trim,undefined,true);
+      }
+      for (const edge of [-1,1]) {
+        box("side-parapet", [.25,.7,hz*2], [x+edge*(hx-.1),h+.65,z], finish.trim,undefined,true);
+        box("parapet-cap", [hx*2+.15,.12,.42], [x,h+1.05,z+edge*(hz-.1)], finish.metal,undefined,true);
+        box("side-parapet-cap", [.42,.12,hz*2+.15], [x+edge*(hx-.1),h+1.05,z], finish.metal,undefined,true);
       }
       if (modern) {
-        for(let c=-hx+3;c<hx-1;c+=3.5) box("vertical-fin", [.22,h-4,.5], [x+c,(h+4)/2,z-hz-.22], cream,undefined,true);
-        box("recessed-crown", [hx*1.45,2.4,hz*.65], [x,h+1.5,z+hz*.55], glass,undefined,true);
-        box("crown-canopy", [hx*1.5,.28,hz*.7], [x,h+2.84,z+hz*.55], cream,undefined,true);
+        for(let c=-hx+3;c<hx-1;c+=3.5) box("vertical-fin", [.22,h-4,.5], [x+c,(h+4)/2,z-hz-.22], finish.metal,undefined,true);
+        box("recessed-crown", [hx*1.45,2.4,hz*.65], [x,h+1.5,z+hz*.55], finish.glass,undefined,true);
+        box("crown-canopy", [hx*1.5,.28,hz*.7], [x,h+2.84,z+hz*.55], finish.trim,undefined,true);
       }
       // Recessed shopfronts and a striped awning make the ground floor read at street scale.
-      box("shop-transom", [hx*1.65,2.6,.18], [x,1.9,z-hz-.14], ink,undefined,true);
+      box("shop-transom", [hx*1.65,2.6,.18], [x,1.9,z-hz-.14], finish.frame,undefined,true);
       for(let c=-hx+2;c<hx-1;c+=3.2) {
-        box("shop-glass", [2.65,2.1,.2], [x+c,1.9,z-hz-.26], glass,undefined,true);
-        const awning=box("shop-awning", [3.2,.15,1.8], [x+c,3.5,z-hz-.85], (Math.round(c)+i)%2 ? cream : red,undefined,true);
+        box("shop-glass", [2.65,2.1,.2], [x+c,1.9,z-hz-.26], finish.glass,undefined,true);
+        const awning=box("shop-awning", [3.2,.15,1.8], [x+c,3.5,z-hz-.85], (Math.round(c)+i)%2 ? finish.trim : finish.accent,undefined,true);
         awning.rotation.x=.12;
       }
-      box("door", [1.4,2.5,.22], [x,1.3,z-hz-.4], cream,undefined,true);
-      box("door-pane", [.95,1.7,.24], [x,1.7,z-hz-.44], glass,undefined,true);
+      box("door", [1.4,2.5,.22], [x,1.3,z-hz-.4], finish.frame,undefined,true);
+      box("door-pane", [.95,1.7,.24], [x,1.7,z-hz-.44], finish.glass,undefined,true);
       box("entry-steps", [2.2,.25,.85], [x,.2,z-hz-.7], stone,undefined,true);
       // Props remain beside lots, away from the central wire course.
       box("sidewalk", [hx*2+3,.12,hz*2+3], [x,.09,z], stone,undefined,true);
@@ -135,8 +150,23 @@ export function createComicArt(scene: Scene) {
       box("street-lamp", [.16,5.4,.16], [x+hx+1,2.8,z+hz], ink,undefined,true);
       box("lamp-arm", [1.4,.15,.18], [x+hx+.45,5.45,z+hz], ink,undefined,true);
       rounded("lamp-shade", [.5,.15,.4], [x+hx-.1,5.4,z+hz], cream);
-      box("roof-service", [4.2, 2.3, 3], [x - hx / 3, h + 1.6, z + hz / 3], i % 2 ? cream : blue, undefined, true);
-      box("roof-vent", [4.4, .2, 3.2], [x - hx / 3, h + 2.85, z + hz / 3], ink, undefined, true);
+      const serviceX=x-hx/3, serviceZ=z+hz/3;
+      box("roof-service", [3.4,1.3,2.5], [serviceX,h+1.1,serviceZ], finish.metal,undefined,true);
+      box("service-cap", [3.6,.12,2.7], [serviceX,h+1.82,serviceZ], finish.trim,undefined,true);
+      for(let l=0;l<5;l++) box("vent-louver", [2.6,.065,.08], [serviceX,h+.7+l*.19,serviceZ-1.3], finish.frame,undefined,true);
+      box("roof-access", [2.4,2.7,2.4], [x+hx*.45,h+1.65,z+hz*.35], finish.trim,undefined,true);
+      box("access-door", [.9,1.9,.12], [x+hx*.45,h+1.3,z+hz*.35-1.23], finish.frame,undefined,true);
+      box("access-cap", [2.65,.18,2.65], [x+hx*.45,h+3.1,z+hz*.35], finish.metal,undefined,true);
+      if (residential) {
+        box("chimney", [.85,2.1,.85], [x-hx*.55,h+1.35,z-hz*.45], finish.accent,undefined,true);
+        box("chimney-cap", [1.12,.18,1.12], [x-hx*.55,h+2.48,z-hz*.45], finish.trim,undefined,true);
+      }
+      if (!modern) {
+        for(const side of [-1,1]) {
+          box("roof-planter", [2.3,.6,.8], [x+side*hx*.35,h+.65,z-hz*.65], finish.accent,undefined,true);
+          box("planter-leaves", [2.05,.26,.65], [x+side*hx*.35,h+1.03,z-hz*.65], foliage,undefined,true);
+        }
+      }
       box("antenna", [.18, 4, .18], [x + hx / 2, h + 2.3, z - hz / 2], ink, undefined, true);
       if (i % 4 === 0) sign(["AIR POST", "SKY PORT", "NORTH 01", "UP / UP", "FLY CLUB"][i / 4], [x, h - 2, z - hz - .3], hx * 1.6, 2, COMIC.yellow);
     });
@@ -158,17 +188,18 @@ export function createComicArt(scene: Scene) {
       for (const side of [-1,1]) {
         box("launch-facade-band", [44,.25,.15], [0,y-1.4,-88+side*8.08], cream,undefined,true);
         for(let x=-18;x<=18;x+=4) {
-          box("launch-frame", [2.8,2.4,.16], [x,y,-88+side*8.16],ink,undefined,true);
-          box("launch-pane", [2.3,1.9,.18], [x,y,-88+side*8.26],glass,undefined,true);
+          box("launch-frame", [2.8,2.4,.16], [x,y,-88+side*8.16],finishes[1].frame,undefined,true);
+          box("launch-pane", [2.3,1.9,.18], [x,y,-88+side*8.26],finishes[1].glass,undefined,true);
+          box("launch-mullion", [.07,1.9,.07], [x,y,-88+side*8.4],finishes[1].frame,undefined,true);
         }
         box("launch-side-band", [.15,.25,16], [side*22.08,y-1.4,-88],cream,undefined,true);
         for(let z=-93;z<=-83;z+=4) {
-          box("launch-side-frame", [.16,2.4,2.8], [side*22.16,y,z],ink,undefined,true);
-          box("launch-side-pane", [.18,1.9,2.3], [side*22.26,y,z],glass,undefined,true);
+          box("launch-side-frame", [.16,2.4,2.8], [side*22.16,y,z],finishes[1].frame,undefined,true);
+          box("launch-side-pane", [.18,1.9,2.3], [side*22.26,y,z],finishes[1].glass,undefined,true);
         }
       }
     }
-    for(const side of [-1,1]) box("launch-pier", [.65,39,.25], [side*20.5,19.5,-79.7],stone,undefined,true);
+    for(const side of [-1,1]) box("launch-pier", [.65,39,.25], [side*20.5,19.5,-79.7],finishes[1].trim,undefined,true);
     // The opening roof is a launch pad, not another anonymous box.
     box("launch-pad", [10, .07, 7], [0, 40.06, -86], yellow, undefined, true);
     for (const side of [-1, 1]) {
@@ -196,7 +227,7 @@ export function createComicArt(scene: Scene) {
   const bake = () => {
     batches.forEach((meshes, mat) => {
       const merged = Mesh.MergeMeshes(meshes, true, true);
-      if (merged) { merged.name = `city-batch-${mat.name}`; merged.isPickable = false; merged.freezeWorldMatrix(); }
+      if (merged) { merged.name = `city-batch-${mat.name}`; merged.isPickable = false; merged.receiveShadows = mat instanceof StandardMaterial; merged.freezeWorldMatrix(); }
     });
     batches.clear();
   };
