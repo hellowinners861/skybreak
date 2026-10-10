@@ -21,6 +21,7 @@ execFileSync(
   [
     require.resolve("typescript/bin/tsc"),
     resolve(root, "src/city-environment.ts"),
+    resolve(root, "src/chamfered-trim.ts"),
     "--target",
     "ES2020",
     "--module",
@@ -37,6 +38,9 @@ execFileSync(
 );
 const { createBuildingShell } = await import(
   pathToFileURL(resolve(output, "city-environment.js")).href
+);
+const { createChamferedTrim } = await import(
+  pathToFileURL(resolve(output, "chamfered-trim.js")).href
 );
 const engine = new NullEngine();
 const scene = new Scene(engine);
@@ -122,8 +126,68 @@ try {
       batch.dispose();
     }
   }
+  for (const [width, height, depth] of [
+    [0.5, 3.78, 0.22],
+    [0.055, 15, 0.25],
+    [0.86, 0.12, 0.38],
+    [0.32, 0.16, 0.07],
+  ]) {
+    const trim = createChamferedTrim(
+      "trim-fixture",
+      width,
+      height,
+      depth,
+      scene,
+    );
+    const p = trim.getVerticesData(VertexBuffer.PositionKind),
+      n = trim.getVerticesData(VertexBuffer.NormalKind),
+      uv = trim.getVerticesData(VertexBuffer.UVKind),
+      triangles = trim.getIndices();
+    assert.ok(
+      [...p, ...n, ...uv].every(Number.isFinite),
+      "finite trim attributes",
+    );
+    const edges = new Map();
+    const key = (i) => p.slice(i * 3, i * 3 + 3).join(",");
+    for (let i = 0; i < p.length; i += 3) {
+      assert.ok(
+        Math.abs(p[i]) <= width / 2 + 1e-6 &&
+          Math.abs(p[i + 1]) <= height / 2 + 1e-6 &&
+          Math.abs(p[i + 2]) <= depth / 2 + 1e-6,
+        "trim bounds",
+      );
+      assert.ok(
+        Math.abs(Math.hypot(n[i], n[i + 1], n[i + 2]) - 1) < 1e-5,
+        "unit trim normal",
+      );
+      assert.ok(
+        p[i] * n[i] + p[i + 1] * n[i + 1] + p[i + 2] * n[i + 2] > 0,
+        "outward trim normal",
+      );
+    }
+    for (let i = 0; i < triangles.length; i += 3) {
+      const keys = triangles.slice(i, i + 3).map(key);
+      assert.equal(new Set(keys).size, 3, "nondegenerate trim triangle");
+      for (let j = 0; j < 3; j++) {
+        const edge = [keys[j], keys[(j + 1) % 3]].sort().join("|");
+        edges.set(edge, (edges.get(edge) ?? 0) + 1);
+      }
+    }
+    assert.ok(
+      [...edges.values()].every((count) => count === 2),
+      "closed trim surface",
+    );
+    assert.ok(
+      Mesh.MergeMeshes(
+        [trim, MeshBuilder.CreateBox("trim-box", {}, scene)],
+        true,
+        true,
+      ),
+      "trim batches with boxes",
+    );
+  }
   console.log(
-    "city verification: PASS (9 shells, collision bounds, outward normals, closed surfaces, metre-scaled UVs, mixed batches)",
+    "city verification: PASS (9 shells, collision bounds, outward normals, closed surfaces, metre-scaled UVs, mixed batches, 4 chamfered trim shapes)",
   );
 } finally {
   scene.dispose();
