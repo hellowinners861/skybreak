@@ -21,6 +21,7 @@ import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, relea
 import { COMIC, createComicArt } from "./comic-art";
 import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
 import { createWallMaterials } from "./wall-materials";
+import { createBuildingFinishes, createRoofDeck } from "./building-finishes";
 import "./style.css";
 
 type AnchorKind = "building" | "giant" | "course";
@@ -88,7 +89,8 @@ engine.setHardwareScalingLevel(1 / Math.min(1.5, window.devicePixelRatio || 1));
 const scene = new Scene(engine);
 const instrumentation = import.meta.env.DEV ? new SceneInstrumentation(scene) : null;
 scene.clearColor = Color4.FromHexString("#a7d9ecff");
-const art = createComicArt(scene);
+const buildingFinishes = createBuildingFinishes(scene);
+const art = createComicArt(scene, buildingFinishes);
 
 const camera = new UniversalCamera("follow-camera", new Vector3(-84, 8, -98), scene);
 camera.minZ = 0.2;
@@ -117,7 +119,6 @@ const material = (name: string, diffuse: string, emissive = "#000000"): Standard
 
 const groundMaterial = material("ground-material", "#b6c9c8");
 const roadMaterial = material("road-material", "#557b97");
-const roofMaterial = material("roof-material", COMIC.cream);
 const anchorMaterial = material("anchor-material", COMIC.yellow, "#6a5010");
 const anchorGiantMaterial = anchorMaterial;
 const coinMaterial = material("coin-material", COMIC.yellow, "#55420e");
@@ -159,13 +160,7 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   building.position = new Vector3(x, 0, z);
   building.material = wallMaterials[index % wallMaterials.length];
 
-  const roof = MeshBuilder.CreateBox(`roof-${index + 1}`, {
-    width: halfX * 2 + 0.45,
-    height: 0.28,
-    depth: halfZ * 2 + 0.45,
-  }, scene);
-  roof.position = new Vector3(x, height + 0.14, z);
-  roof.material = roofMaterial;
+  createRoofDeck(`roof-${index + 1}`, x, z, halfX, halfZ, height, buildingFinishes[index % 3].roof, scene);
 
   const anchorMesh = MeshBuilder.CreateSphere(`building-anchor-${index + 1}`, { diameter: 1.1, segments: 8 }, scene);
   const anchorPosition = new Vector3(x, height + 2, z);
@@ -179,6 +174,8 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
 const openingRoof = createBuildingShell("opening-roof", 22, 8, 40, 1, scene);
 openingRoof.position = new Vector3(0, 0, -88);
 openingRoof.material = wallMaterials[1];
+// Keep the cap above the wall top (40m), below the launch markings (40.025m).
+createRoofDeck("roof-opening", 0, -88, 22, 8, 39.732, buildingFinishes[1].roof, scene);
 buildings.push({ mesh: openingRoof, x: 0, z: -88, halfX: 22, halfZ: 8, top: 40 });
 
 const courseAnchorPositions = COURSE_ANCHORS.map(([x, y, z]) => new Vector3(x, y, z));
@@ -223,8 +220,16 @@ for (const [paint, meshes] of shellGroups) {
     cityShells.push(merged);
   }
 }
-const staticRoofs = scene.meshes.filter(mesh => /^roof-\d+$/.test(mesh.name)) as Mesh[];
-const cityRoofs = Mesh.MergeMeshes(staticRoofs, true, true);
+const roofGroups = new Map<Material, Mesh[]>();
+for (const roof of scene.meshes.filter(mesh => /^roof-(\d+|opening)$/.test(mesh.name)) as Mesh[]) {
+  const group = roofGroups.get(roof.material!) ?? [];
+  group.push(roof); roofGroups.set(roof.material!, group);
+}
+const cityRoofs: Mesh[] = [];
+for (const [paint, meshes] of roofGroups) {
+  const merged = Mesh.MergeMeshes(meshes, true, true);
+  if (merged) { merged.name = `city-roofs-${paint.name}`; merged.receiveShadows = true; merged.isPickable = false; merged.freezeWorldMatrix(); cityRoofs.push(merged); }
+}
 // Static sun shadows render once, keeping city depth affordable on mobile.
 const cityShadows = new ShadowGenerator(1024, sun);
 cityShadows.usePercentageCloserFiltering = true;
@@ -233,7 +238,7 @@ cityShadows.setDarkness(.3);
 cityShadows.bias = .003;
 cityShadows.normalBias = .05;
 for (const mesh of cityShells) cityShadows.addShadowCaster(mesh);
-if (cityRoofs) cityShadows.addShadowCaster(cityRoofs);
+for (const roof of cityRoofs) cityShadows.addShadowCaster(roof);
 for (const mesh of scene.meshes) {
   if (mesh.name === "city-batch-city-sage" || mesh.name === "city-batch-city-leaf") cityShadows.addShadowCaster(mesh);
 }
