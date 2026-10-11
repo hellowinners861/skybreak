@@ -11,11 +11,11 @@ export type VisibleWireTarget<T> = {
 };
 
 export function nearestVisibleWireTarget<T>(
-  targets: VisibleWireTarget<T>[], player: FlightVec, nearPlane: number, maxDistance = Infinity, excludedTarget?: T,
+  targets: VisibleWireTarget<T>[], player: FlightVec, nearPlane: number, maxDistance = Infinity, excludedTarget?: T, excludedTargets: readonly T[] = [],
 ): { target: T; distance: number } | null {
   let nearest: { target: T; distance: number } | null = null;
   for (const point of targets) {
-    if (excludedTarget !== undefined && point.target === excludedTarget) continue;
+    if ((excludedTarget !== undefined && point.target === excludedTarget) || excludedTargets.includes(point.target)) continue;
     if (point.blocked || point.cameraDepth <= nearPlane ||
         !Number.isFinite(point.screenX) || !Number.isFinite(point.screenY) ||
         Math.abs(point.screenX) > 1 || Math.abs(point.screenY) > 1) continue;
