@@ -1,3 +1,4 @@
+import { createAppMenu, type GameSettings } from './app-menu';
 import {
   Color3,
   Color4,
@@ -396,7 +397,9 @@ const getMovement = (): Vector3 => {
 const isBoosting = (): boolean => boostTimer > 0;
 
 const triggerBoost = (): void => {
+  if (!appMenu?.isPlaying()) return;
   if (boostCooldown > 0 || stageCleared) return;
+  appMenu.sound("boost");
   boostTimer = 0.7;
   boostCooldown = 1;
   boosting = true;
@@ -480,13 +483,14 @@ const findCandidate = (): void => {
 };
 
 const toggleWire = (): void => {
-  if (stageCleared) return;
+  if (!appMenu?.isPlaying() || stageCleared) return;
   const transferring = !!attachedAnchor;
   findCandidate();
   if (!candidateAnchor) {
     showMessage(transferring ? "画面内に次のポイントがありません / 接続を維持" : "接続できるアンカーがありません", "warn");
     return;
   }
+  appMenu.sound("wire");
   attachedAnchor = candidateAnchor;
   flightState.position = [playerPosition.x, playerPosition.y, playerPosition.z];
   flightState.velocity = [velocity.x, velocity.y, velocity.z];
@@ -530,13 +534,14 @@ const collectCoins = (): void => {
     art.burst(coin.mesh.position);
     coin.collected = true;
     coin.mesh.setEnabled(false);
+    appMenu.sound("coin");
     coinsCollected = progress.collectedCount;
     showMessage(`コイン取得　${coinsCollected} / 12`, "good");
   }
 };
 
 const attack = (): void => {
-  if (stageCleared || attackCooldown > 0) return;
+  if (!appMenu?.isPlaying() || stageCleared || attackCooldown > 0) return;
   attackButton.classList.add("active");
   window.setTimeout(() => attackButton.classList.remove("active"), 110);
   const distance = Vector3.Distance(playerPosition, weakpoint.position);
@@ -555,6 +560,7 @@ const attack = (): void => {
     showMessage("弱点へ近づいて攻撃", "warn");
     return;
   }
+  appMenu.sound("attack");
   weakpointFlash = 0.3;
   art.burst(weakpoint.position);
   showMessage(`弱点ヒット　残りHP ${giantHp}`, "good");
@@ -659,7 +665,7 @@ const updateCamera = (dt: number, now: number): void => {
   const focus = playerPosition.add(new Vector3(0, 2.05, 0));
   // During the opening only, preview the next hook before reaching the current
   // one. Manual swipes take priority, including while the finger is held down.
-  if (attachedAnchor?.kind === "course" && courseStage < 3 && cameraPointerId === null && now >= manualCameraUntil) {
+  if (appMenu.getSettings().courseCamera && attachedAnchor?.kind === "course" && courseStage < 3 && cameraPointerId === null && now >= manualCameraUntil) {
     const nextIndex = Math.min(courseAnchorPositions.length - 1, Math.max(courseStage, (attachedAnchor.courseIndex ?? 0) + 1));
     const offset = courseAnchorPositions[nextIndex].subtract(focus);
     const wantedYaw = Math.atan2(offset.x, offset.z);
@@ -743,7 +749,7 @@ const updatePhysicsStep = (dt: number): void => {
   player.position.copyFrom(playerPosition);
   if (velocity.lengthSquared() > 0.1) player.rotation.y = Math.atan2(velocity.x, velocity.z);
   const speed = velocity.length();
-  speedLines.classList.toggle("active", speed > 15 || isBoosting());
+  speedLines.classList.toggle("active", appMenu.getSettings().speedLines && (speed > 15 || isBoosting()));
 };
 
 const updatePhysics = (dt: number): void => {
@@ -793,6 +799,7 @@ const updateWorld = (dt: number): void => {
   }
   if (!stageCleared && isStageClear(progress)) {
     stageCleared = true;
+    appMenu.markClear();
     detachWire(false);
     clearCoins.textContent = String(coinsCollected);
     clearScreen.classList.remove("is-hidden");
@@ -868,8 +875,8 @@ wireButton.addEventListener("click", (event: MouseEvent) => {
   event.stopPropagation();
   toggleWire();
 });
-retryButton.addEventListener("click", () => resetStage());
-quickRetryButton.addEventListener("click", () => resetStage());
+retryButton.addEventListener("click", () => appMenu.restart());
+quickRetryButton.addEventListener("click", () => appMenu.confirmRestart());
 
 canvas.addEventListener("pointerdown", (event: PointerEvent) => {
   if (event.pointerType === "mouse" && event.button !== 0 && event.button !== 2) return;
@@ -887,8 +894,8 @@ canvas.addEventListener("pointermove", (event: PointerEvent) => {
   const dy = event.clientY - cameraLastY;
   cameraLastX = event.clientX;
   cameraLastY = event.clientY;
-  cameraYaw += dx * 0.006;
-  cameraPitch = clamp(cameraPitch - dy * 0.004, -0.8, 0.9);
+  cameraYaw += dx * 0.006 * appMenu.getSettings().sensitivity;
+  cameraPitch = clamp(cameraPitch - dy * 0.004 * appMenu.getSettings().sensitivity, -0.8, 0.9);
   manualCameraUntil = performance.now() + 1600;
 });
 const endCamera = (event: PointerEvent): void => {
@@ -899,6 +906,8 @@ canvas.addEventListener("pointercancel", endCamera);
 canvas.addEventListener("contextmenu", (event: MouseEvent) => event.preventDefault());
 
 window.addEventListener("keydown", (event: KeyboardEvent) => {
+  if (event.code === "Escape") { event.preventDefault(); if (!event.repeat) appMenu.escape(); return; }
+  if (!appMenu.isPlaying() || (event.target as HTMLElement)?.matches("input, select, button")) return;
   pressedKeys.add(event.code);
   if (["Space", "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight"].includes(event.code)) event.preventDefault();
   if (event.repeat) return;
@@ -906,7 +915,7 @@ window.addEventListener("keydown", (event: KeyboardEvent) => {
   if (event.code === "KeyQ") detachWire(true);
   if (event.code === "ShiftLeft" || event.code === "ShiftRight") triggerBoost();
   if (event.code === "KeyE") attack();
-  if (event.code === "KeyR") resetStage();
+  if (event.code === "KeyR") appMenu.confirmRestart();
 });
 window.addEventListener("keyup", (event: KeyboardEvent) => pressedKeys.delete(event.code));
 
@@ -916,22 +925,33 @@ const resetPointersAndKeys = (): void => {
   cameraPointerId = null;
   boostPointerId = null;
   boosting = false;
-  boostTimer = 0;
-  boostCooldown = 0;
   boostButton.classList.remove("active");
   resetStick();
 };
-window.addEventListener("blur", resetPointersAndKeys);
+window.addEventListener("blur", () => { resetPointersAndKeys(); appMenu?.pause(); });
 document.addEventListener("visibilitychange", () => {
-  if (document.hidden) resetPointersAndKeys();
+  if (document.hidden) { resetPointersAndKeys(); appMenu?.pause(); }
 });
 
+let appMenu: ReturnType<typeof createAppMenu>;
+const applySettings = (settings: GameSettings): void => {
+  const limit = settings.quality === 'low' ? 1 : settings.quality === 'high' ? 2 : 1.5;
+  const scale = 1 / Math.min(limit, window.devicePixelRatio || 1);
+  if (engine.getHardwareScalingLevel() !== scale) { engine.setHardwareScalingLevel(scale); engine.resize(); }
+  speedLines.style.display = settings.speedLines ? '' : 'none';
+};
 resetStage();
+appMenu = createAppMenu({ start: resetStage, resetInput: resetPointersAndKeys, settings: applySettings });
+let lastMenuRender = 0;
 let previousTime = performance.now();
 engine.runRenderLoop(() => {
   const now = performance.now();
   const dt = clamp((now - previousTime) / 1000, 0, 0.1);
   previousTime = now;
+  if (!appMenu.isPlaying()) {
+    if (now - lastMenuRender >= 250) { scene.render(); lastMenuRender = now; }
+    return;
+  }
   if (!stageCleared) updatePhysics(dt);
   updateCamera(dt, now);
   if (!stageCleared) updateWorld(dt);
@@ -956,6 +976,7 @@ window.addEventListener("resize", () => engine.resize());
 // Read-only development diagnostics for real input and rendering QA. No production API.
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
+    screen: document.querySelector("#game-shell")?.getAttribute("data-screen"), settings: appMenu.getSettings(),
     position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, recoveryRemaining: flightState.recoveryRemaining ?? 0, candidateDistance, speed: velocity.length(), grounded,
     attached: attachedAnchor?.name ?? null, candidate: candidateAnchor?.name ?? null,
     courseStage, coins: coinsCollected, giantHp, boosting: isBoosting(), stageCleared,
