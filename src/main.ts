@@ -469,7 +469,12 @@ const findCandidate = (): void => {
       blocked: segmentBlocked(camera.position, anchor.position),
     });
   }
-  const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ, Infinity, attachedAnchor ?? undefined);
+  // NEXT in the opening course should not send the player back to an earlier hook.
+  // They remain available to WIRE when detached, and after the opening ends.
+  const completedBefore = Math.max(courseStage, attachedAnchor?.courseIndex ?? 0);
+  const completed = attachedAnchor?.kind === "course" && courseStage < 3
+    ? anchors.filter(anchor => anchor.kind === "course" && (anchor.courseIndex ?? -1) < completedBefore) : [];
+  const best = nearestVisibleWireTarget(candidates, [playerPosition.x, playerPosition.y, playerPosition.z], camera.minZ, Infinity, attachedAnchor ?? undefined, completed);
   candidateAnchor = best?.target ?? null;
   candidateDistance = best?.distance ?? 0;
 };
@@ -651,8 +656,19 @@ const updateHud = (): void => {
 };
 
 const updateCamera = (dt: number, now: number): void => {
-  const forward = viewDirection();
   const focus = playerPosition.add(new Vector3(0, 2.05, 0));
+  // During the opening only, preview the next hook before reaching the current
+  // one. Manual swipes take priority, including while the finger is held down.
+  if (attachedAnchor?.kind === "course" && courseStage < 3 && cameraPointerId === null && now >= manualCameraUntil) {
+    const nextIndex = Math.min(courseAnchorPositions.length - 1, Math.max(courseStage, (attachedAnchor.courseIndex ?? 0) + 1));
+    const offset = courseAnchorPositions[nextIndex].subtract(focus);
+    const wantedYaw = Math.atan2(offset.x, offset.z);
+    const yawDelta = Math.atan2(Math.sin(wantedYaw - cameraYaw), Math.cos(wantedYaw - cameraYaw));
+    cameraYaw += yawDelta * (1 - Math.exp(-2.5 * dt));
+    const wantedPitch = clamp(Math.atan2(offset.y, Math.max(14, Math.hypot(offset.x, offset.z))), -0.6, 1.2);
+    cameraPitch += (wantedPitch - cameraPitch) * (1 - Math.exp(-3 * dt));
+  }
+  const forward = viewDirection();
   let wantedPosition = focus.subtract(forward.scale(14));
   if (segmentBlocked(focus, wantedPosition)) wantedPosition = focus.subtract(forward.scale(5.8));
   // Looking up from the street must not put the orbit camera under the ground.

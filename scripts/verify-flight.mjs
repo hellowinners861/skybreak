@@ -125,6 +125,11 @@ assert.equal(nearestVisibleWireTarget([target("old",31),target("new",30.9,.8)], 
 assert.equal(nearestVisibleWireTarget([target("current",1),target("next",20)], [0,0,0], .2,Infinity,"current").target,"next","transfer excludes the attached anchor");
 assert.equal(nearestVisibleWireTarget([target("current",1)], [0,0,0], .2,Infinity,"current"),null,"no next anchor returns no replacement");
 
+assert.equal(nearestVisibleWireTarget([target("COURSE 1",5),target("COURSE 2",1),target("COURSE 3",24)], [0,0,0], .2,Infinity,"COURSE 2",["COURSE 1"]).target,"COURSE 3","opening NEXT skips completed hooks and the current hook");
+assert.equal(nearestVisibleWireTarget([target("COURSE 1",5),target("COURSE 3",24)], [0,0,0], .2).target,"COURSE 1","detached WIRE still allows returning to completed hooks");
+assert.equal(nearestVisibleWireTarget([target("COURSE 1",5),target("COURSE 3",24,0,1.1)], [0,0,0], .2,Infinity,"COURSE 2",["COURSE 1"]),null,"completed filtering never connects to an offscreen next hook");
+assert.equal(nearestVisibleWireTarget([target("COURSE 1",5),target("building",12),target("COURSE 3",24)], [0,0,0], .2,Infinity,"COURSE 2",["COURSE 1"]).target,"building","nearest visible building hooks remain eligible");
+
 const simulate = (fps) => {
   const dt = 1 / fps;
   const state = { position: [0, 41.15, -86], velocity: [0, 0, 0], grounded: true, attached: false, ropeLength: 0 };
