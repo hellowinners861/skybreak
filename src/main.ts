@@ -1,3 +1,4 @@
+import { chooseAttack, attackVelocity, guideAttack, sweptWeakpointHit, impactVelocity, type AttackKind } from './combat';
 import { createAppMenu, type GameSettings } from './app-menu';
 import {
   Color3,
@@ -17,7 +18,7 @@ import {
   UniversalCamera,
   Vector3,
 } from "@babylonjs/core";
-import { collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
+import { damageGiant, collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
 import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
 import { COMIC, createComicArt } from "./comic-art";
 import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
@@ -324,6 +325,8 @@ let giantHp = 3;
 let stageCleared = false;
 let attackCooldown = 0;
 let weakpointFlash = 0;
+let specialAttack: { kind: "rush" | "dive"; remaining: number } | null = null;
+let lastAttack: AttackKind | null = null;
 let safePositionTimer = 0;
 let messageTimer = 0;
 let courseStage = 0;
@@ -490,6 +493,7 @@ const toggleWire = (): void => {
     showMessage(transferring ? "画面内に次のポイントがありません / 接続を維持" : "接続できるアンカーがありません", "warn");
     return;
   }
+  specialAttack = null;
   appMenu.sound("wire");
   attachedAnchor = candidateAnchor;
   flightState.position = [playerPosition.x, playerPosition.y, playerPosition.z];
@@ -519,6 +523,7 @@ const updateWire = (): void => {
 
 const respawn = (): void => {
   detachWire(false);
+  specialAttack = null;
   playerPosition.copyFrom(lastSafePosition);
   velocity.copyFromFloats(0, 0, 0);
   grounded = true;
@@ -540,31 +545,42 @@ const collectCoins = (): void => {
   }
 };
 
+const weakpointVisible = (): boolean => {
+  const offset = weakpoint.position.subtract(camera.position);
+  const forward = camera.getForwardRay(1).direction.normalize();
+  const right = Vector3.Cross(Vector3.Up(), forward).normalize();
+  const up = Vector3.Cross(forward, right).normalize();
+  const depth = Vector3.Dot(offset, forward), tanFov = Math.tan(camera.fov / 2);
+  return giantHp > 0 && depth > camera.minZ
+    && Math.abs(Vector3.Dot(offset, right) / (depth * tanFov * engine.getRenderWidth() / engine.getRenderHeight())) <= 1
+    && Math.abs(Vector3.Dot(offset, up) / (depth * tanFov)) <= 1
+    && !segmentBlocked(camera.position, weakpoint.position) && !segmentBlocked(playerPosition, weakpoint.position);
+};
+const availableAttack = (): AttackKind => chooseAttack([playerPosition.x,playerPosition.y,playerPosition.z], [velocity.x,velocity.y,velocity.z], grounded, [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z], weakpointVisible());
+const attackName = (kind: AttackKind): string => kind === "rush" ? "高速突進" : kind === "dive" ? "落下攻撃" : "通常攻撃";
+const showImpact = (kind: AttackKind): void => {
+  appMenu.sound("attack"); weakpointFlash = kind === "normal" ? .3 : .65;
+  art.burst(weakpoint.position); lastAttack = kind;
+  showMessage(`${attackName(kind)}！ ${kind === "normal" ? 1 : 2}ダメージ / 残りHP ${giantHp}`, "good");
+};
 const attack = (): void => {
-  if (!appMenu?.isPlaying() || stageCleared || attackCooldown > 0) return;
+  if (!appMenu?.isPlaying() || stageCleared || attackCooldown > 0 || specialAttack) return;
+  if (giantHp <= 0) { showMessage("巨人はすでに倒れている", "good"); return; }
+  const kind = availableAttack();
   attackButton.classList.add("active");
   window.setTimeout(() => attackButton.classList.remove("active"), 110);
-  const distance = Vector3.Distance(playerPosition, weakpoint.position);
-  const result = tryAttack(progress, distance <= 22);
-  attackCooldown = progress.attackCooldown;
-  giantHp = progress.giantHp;
-  if (result === "defeated") {
-    showMessage("巨人はすでに倒れている", "good");
-    return;
+  if (kind !== "normal") {
+    detachWire(false); grounded = false;
+    velocity.copyFromFloats(...attackVelocity(kind, [playerPosition.x,playerPosition.y,playerPosition.z], [velocity.x,velocity.y,velocity.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z]));
+    specialAttack = { kind, remaining: 1.4 };
+    progress.attackCooldown = 1.75; attackCooldown = 1.75;
+    appMenu.sound("boost");
+    showMessage(`${attackName(kind)}！ 弱点へ`, "good"); return;
   }
-  if (result === "cooldown") {
-    showMessage("攻撃準備中", "warn");
-    return;
-  }
-  if (result === "out-of-range") {
-    showMessage("弱点へ近づいて攻撃", "warn");
-    return;
-  }
-  appMenu.sound("attack");
-  weakpointFlash = 0.3;
-  art.burst(weakpoint.position);
-  showMessage(`弱点ヒット　残りHP ${giantHp}`, "good");
-  if (giantHp <= 0) showMessage("巨人撃破。コインを8枚集めよう", "good");
+  const result = tryAttack(progress, Vector3.Distance(playerPosition, weakpoint.position) <= 22 && !segmentBlocked(playerPosition, weakpoint.position));
+  attackCooldown = progress.attackCooldown; giantHp = progress.giantHp;
+  if (result === "out-of-range") { showMessage("弱点へ近づこう / 加速ならRUSH、上から落下ならDIVE", "warn"); return; }
+  if (result === "hit") showImpact(kind);
 };
 
 const resetStage = (): void => {
@@ -584,6 +600,7 @@ const resetStage = (): void => {
   boostTimer = 0;
   boostCooldown = 0;
   weakpointFlash = 0;
+  specialAttack = null; lastAttack = null; player.rotation.x = 0;
   stageCleared = false;
   cameraYaw = 0;
   cameraPitch = -0.12;
@@ -600,6 +617,11 @@ const resetStage = (): void => {
 
 const updateHud = (): void => {
   releaseButton.disabled = !attachedAnchor;
+  const kind = specialAttack?.kind ?? availableAttack();
+  select<HTMLElement>("#attack-label").textContent = specialAttack ? "GO!" : attackCooldown > 0 ? "WAIT" : kind === "rush" ? "RUSH" : kind === "dive" ? "DIVE" : "ATTACK";
+  attackButton.dataset.kind = kind;
+  attackButton.setAttribute("aria-label", `${attackName(kind)}${attackCooldown > 0 ? "、準備中" : ""}`);
+  select<HTMLElement>("#combat-readout").textContent = giantHp <= 0 ? "巨人撃破！ コインを集めよう" : specialAttack ? `${attackName(kind)}中！` : attackCooldown > 0 ? "攻撃準備中…" : kind === "rush" ? "高速突進 READY / ATTACKで弱点へ" : kind === "dive" ? "落下攻撃 READY / ATTACKで急降下" : "ATTACK通常 / 加速でRUSH・上から落下でDIVE";
   coinCount.textContent = `COIN ${String(coinsCollected).padStart(2, "0")} / 12`;
   speedReadout.textContent = String(Math.round(velocity.length()));
   speedFill.style.width = `${Math.min(100, velocity.length() / maxSpeed * 100)}%`;
@@ -711,6 +733,10 @@ const updatePhysicsStep = (dt: number): void => {
   flightState.velocity = [velocity.x, velocity.y, velocity.z];
   flightState.grounded = grounded;
   flightState.ropeLength = ropeLength;
+  if (specialAttack) {
+    velocity.copyFromFloats(...guideAttack([playerPosition.x,playerPosition.y,playerPosition.z], [velocity.x,velocity.y,velocity.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z], dt));
+    flightState.velocity = [velocity.x,velocity.y,velocity.z];
+  }
   if (attachedAnchor) {
     const forward = viewDirection();
     stepAttached(flightState, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z],
@@ -738,6 +764,19 @@ const updatePhysicsStep = (dt: number): void => {
   velocity.copyFromFloats(...flightState.velocity);
   ropeLength = flightState.ropeLength;
   grounded = flightState.grounded;
+  if (specialAttack) {
+    const blocked = segmentBlocked(new Vector3(...previous), playerPosition);
+    if (!blocked && !touched && sweptWeakpointHit(previous, [playerPosition.x,playerPosition.y,playerPosition.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z])) {
+      const kind = specialAttack.kind; specialAttack = null;
+      // The cooldown was reserved at launch; only physical contact deals damage.
+      damageGiant(progress, 2); giantHp = progress.giantHp;
+      velocity.copyFromFloats(...impactVelocity([playerPosition.x,playerPosition.y,playerPosition.z], [velocity.x,velocity.y,velocity.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z]));
+      showImpact(kind);
+    } else {
+      specialAttack.remaining -= dt;
+      if (touched || specialAttack.remaining <= 0) { specialAttack = null; showMessage("攻撃終了 / 再びワイヤーで飛ぼう", "normal"); }
+    }
+  }
   // Release on contact instead of repeatedly pulling the character into a roof
   // or fighting the wall correction on the following physics step.
   if (attachedAnchor && touched) {
@@ -895,7 +934,7 @@ canvas.addEventListener("pointermove", (event: PointerEvent) => {
   cameraLastX = event.clientX;
   cameraLastY = event.clientY;
   cameraYaw += dx * 0.006 * appMenu.getSettings().sensitivity;
-  cameraPitch = clamp(cameraPitch - dy * 0.004 * appMenu.getSettings().sensitivity, -0.8, 0.9);
+  cameraPitch = clamp(cameraPitch - dy * 0.004 * appMenu.getSettings().sensitivity, -1.3, 0.9);
   manualCameraUntil = performance.now() + 1600;
 });
 const endCamera = (event: PointerEvent): void => {
@@ -964,6 +1003,7 @@ engine.runRenderLoop(() => {
   updateSky(dt);
   const wireOffset = attachedAnchor?.position.subtract(playerPosition);
   const wireLean = wireOffset ? Math.atan2(wireOffset.x*Math.sin(player.rotation.y)+wireOffset.z*Math.cos(player.rotation.y), Math.max(.5,wireOffset.y)) : 0;
+  player.rotation.x = approach(player.rotation.x, specialAttack?.kind === "dive" ? .85 : specialAttack?.kind === "rush" ? .35 : 0, dt * 4);
   animateHero(dt, velocity.length(), grounded, !!attachedAnchor, wireLean);
   animateGiant(now / 1000, giantHp, weakpointFlash);
   weakpoint.setEnabled(giantHp > 0);
@@ -976,9 +1016,11 @@ window.addEventListener("resize", () => engine.resize());
 // Read-only development diagnostics for real input and rendering QA. No production API.
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
+    cameraYaw, cameraPitch,
     screen: document.querySelector("#game-shell")?.getAttribute("data-screen"), settings: appMenu.getSettings(),
     position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, recoveryRemaining: flightState.recoveryRemaining ?? 0, candidateDistance, speed: velocity.length(), grounded,
     attached: attachedAnchor?.name ?? null, candidate: candidateAnchor?.name ?? null,
+    attack: specialAttack?.kind ?? null, attackRemaining: specialAttack?.remaining ?? 0, lastAttack, availableAttack: availableAttack(),
     courseStage, coins: coinsCollected, giantHp, boosting: isBoosting(), stageCleared,
     render: { drawCalls: instrumentation?.drawCallsCounter.current ?? 0, activeMeshes: scene.getActiveMeshes().length,
       vertices: scene.getTotalVertices(), materials: scene.materials.length, textures: scene.textures.length,
