@@ -19,12 +19,17 @@ export const collectCoin = (state: ProgressState, index: number): boolean => {
   return true;
 };
 
-export const tryAttack = (state: ProgressState, inRange: boolean, cooldown = 0.62): "hit" | "cooldown" | "out-of-range" | "defeated" => {
+export const damageGiant = (state: ProgressState, damage: number): void => {
+  if (!Number.isFinite(damage) || damage <= 0) return;
+  state.giantHp = Math.max(0, state.giantHp - Math.min(3, Math.floor(damage)));
+};
+
+export const tryAttack = (state: ProgressState, inRange: boolean, cooldown = 0.62, damage = 1): "hit" | "cooldown" | "out-of-range" | "defeated" => {
   if (state.giantHp <= 0) return "defeated";
   if (state.attackCooldown > 0) return "cooldown";
   state.attackCooldown = cooldown;
   if (!inRange) return "out-of-range";
-  state.giantHp -= 1;
+  damageGiant(state, damage);
   return "hit";
 };
 
