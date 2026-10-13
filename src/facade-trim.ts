@@ -19,6 +19,7 @@ export function decorateFacadeColumns(
   index: number,
   finishes: ReturnType<typeof createBuildingFinishes>,
   batch: (mesh: Mesh, material: Material) => void,
+  detailStride = 1,
 ) {
   const family = index % 3,
     finish = finishes[family],
@@ -114,8 +115,8 @@ export function decorateFacadeColumns(
         const start = 0.82,
           end = h - 0.55;
         // Real joints catch light on the beveled edges rather than painted black lines.
-        for (let bottom = start; bottom < end; bottom += 3.8) {
-          const top = Math.min(bottom + 3.78, end);
+        for (let bottom = start; bottom < end; bottom += 3.8*detailStride) {
+          const top = Math.min(bottom + 3.8*detailStride-.02, end);
           piece(
             "stone-pilaster-block",
             family === 0 ? 0.5 : 0.54,
@@ -235,7 +236,7 @@ export function decorateFacadeColumns(
             side,
             finish.metal,
           );
-          for (let y = 7.9; y < end - 0.4; y += 4)
+          for (let y = 7.9; y < end - 0.4; y += 4*detailStride)
             piece(
               "fin-bracket",
               0.21,

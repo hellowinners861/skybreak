@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 mkdirSync(output, { recursive: true });
 execFileSync(process.execPath, [
   require.resolve("typescript/bin/tsc"),
-  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"),
+  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"), resolve(root, "src/stage-config.ts"),
   "--target", "ES2020", "--module", "ES2020", "--moduleResolution", "Bundler",
   "--outDir", output, "--skipLibCheck", "--pretty", "false",
 ], { cwd: root, stdio: "inherit" });
@@ -72,3 +72,22 @@ for(const kind of ['rush','dive']) for(const fps of [30,60,120]) {
 }
 const heavy=gameplay.createProgressState(0,3);assert.equal(gameplay.tryAttack(heavy,true,1.4,2),'hit');assert.equal(heavy.giantHp,1);assert.equal(gameplay.tryAttack(heavy,true,1.4,2),'cooldown');assert.equal(heavy.giantHp,1,'one press cannot repeatedly damage');gameplay.tickAttackCooldown(heavy,1.4);gameplay.tryAttack(heavy,true,1.4,2);assert.equal(heavy.giantHp,0,'lethal damage clamps HP');
 console.log('combat verification: PASS (rush/dive eligibility, actual travel, swept contact, misses, cooldown, damage and rebound at 30/60/120Hz)');
+
+const stages=await import(pathToFileURL(resolve(output,'stage-config.js')).href);
+const one=stages.stageConfig(1),two=stages.stageConfig(2);
+assert.equal((two.halfExtent/one.halfExtent)**2,4,'stage2 area is exactly four times');
+assert.equal((two.playableHalfExtent/one.playableHalfExtent)**2,4,'playable boundary area also quadruples');
+assert.equal(two.launchHeight,one.launchHeight*3);assert.equal(two.giantScale,4);assert.equal(one.giantScale,1);
+for(let i=0;i<one.lots.length;i++)assert.equal(two.lots[i][4],one.lots[i][4]*3,'base building heights exactly triple');
+for(let t=0;t<126;t+=.1){
+ const pose=stages.giantPose(t),next=stages.giantPose(t+.01);
+ const speed=Math.hypot(...next.position.map((v,i)=>(v-pose.position[i])/.01));assert.ok(speed<4.6,'patrol speed bounded');
+ const front=[-Math.sin(pose.yaw),-Math.cos(pose.yaw)],delta=[next.position[0]-pose.position[0],next.position[2]-pose.position[2]];
+ assert.ok(front[0]*delta[0]+front[1]*delta[1]>0,'giant faces its direction of travel');
+ for(const [x,z,hx,hz] of two.lots){const dx=Math.max(0,Math.abs(pose.position[0]-x)-hx),dz=Math.max(0,Math.abs(pose.position[2]-z)-hz);assert.ok(Math.hypot(dx,dz)>36,'giant patrol clears every building');}
+ const hook=stages.giantPoint([0,23,0],pose,4);assert.equal(hook[1],92);
+ assert.ok(Math.hypot(hook[0]-pose.position[0],hook[2]-pose.position[2])<1e-8,'head hook follows body');
+}
+for(const coin of two.coins) for(const [x,z,hx,hz,h] of two.lots)if(Math.abs(coin[0]-x)<hx &&Math.abs(coin[2]-z)<hz)assert.ok(coin[1]>h+1.15,'coins stay above roofs');
+assert.ok(combat.sweptWeakpointHit([-10,0,0],[10,0,0],[0,0,0]),'relative sweep detects a moving target crossing the player');
+console.log('stage verification: PASS (area/height/giant ratios, patrol clearance/speed/facing, moving hooks and rooftop coins)');

@@ -160,7 +160,7 @@ export function characterModels(scene: Scene, paint: Paints) {
     };
   }
 
-  function createGiant(root: TransformNode) {
+  function createGiant(root: TransformNode, walkingEnabled = false) {
     const body=pivot("sentinel-body",root,[0,0,0]);
     loft("sentinel-pelvis",[[7.8,2.4,1.55],[8.7,3.25,1.9],[9.8,2.9,1.8],[10.3,2.35,1.55]],ink,body);
     loft("sentinel-torso-shell",[[9.3,2.45,1.65],[10.5,2.9,1.9],[12.2,4.1,2.3],[15.5,4.7,2.6],[17.5,4.3,2.3],[18.5,3.2,1.75],[18.9,1.8,1.45]],blue,body, [0,0,0],32);
@@ -184,7 +184,9 @@ export function characterModels(scene: Scene, paint: Paints) {
     loft("sentinel-jaw-guard",[[-1.6,1.15,.24],[-1.25,1.5,.4],[-.65,1.45,.34]],cream,head,[0,0,-1.47]);
     tube("sentinel-helmet-ridge",[[0,2.06,1.1],[0,2.3,.5],[0,2.3,-.4],[0,1.9,-1.4]],.22,red,head);
     const arms: {shoulder:TransformNode;elbow:TransformNode;side:number}[]=[];
+    const legs: {pivot:TransformNode;side:number}[]=[];
     for(const side of [-1,1]) {
+      const legStart = scene.meshes.length;
       oval("sentinel-hip-joint",[2.6,2.6,2.7],[side*2.05,8.5,0],ink,body);
       loft("sentinel-thigh-armor",[[4.8,1.04,1.08],[5.5,1.45,1.48],[7.6,1.47,1.4],[8.4,1.05,1.06]],blue,body,[side*2.25,0,0]);
       oval("sentinel-knee-joint",[2.2,2.1,2.1],[side*2.3,4.9,0],ink,body);
@@ -193,6 +195,11 @@ export function characterModels(scene: Scene, paint: Paints) {
       tube("sentinel-shin-ridge",[[side*2.3,1.5,-1.23],[side*2.3,3.2,-1.43],[side*2.3,4,-1.25]],.12,cream,body);
       loft("sentinel-foot",[[.02,1.24,2,-.7],[.28,1.62,2.4,-.8],[.8,1.6,2.4,-.8],[1.3,1.2,1.95,-.45],[1.75,1.02,1.2]],ink,body,[side*2.3,0,0]);
       loft("sentinel-boot-toe",[[.6,1.36,.7],[1.0,1.45,.85],[1.25,1.05,.5]],cream,body,[side*2.3,0,-2.2]);
+      if (walkingEnabled) {
+        const leg=pivot(`sentinel-leg-${side}`,body,[side*2.3,8.5,0]);
+        for (const mesh of scene.meshes.slice(legStart)) { mesh.parent=leg; mesh.position.subtractInPlace(leg.position); }
+        batchJoint(leg); legs.push({pivot:leg,side});
+      }
       const shoulder=pivot(`sentinel-shoulder-${side}`,body,[side*5.3,16.5,0]);
       oval("sentinel-shoulder-bearing",[3,3.2,3.1],[0,0,0],ink,shoulder);
       const pauldron=loft("sentinel-domed-pauldron",[[-.8,1.8,1.55],[-.15,2.2,2.02],[.8,2.2,2.1],[1.65,1.8,1.7],[2.1,1.1,1.05],[2.28,.25,.3]],cream,shoulder,[side*1.1,.1,0]);pauldron.rotation.z=-side*.22;
@@ -208,11 +215,13 @@ export function characterModels(scene: Scene, paint: Paints) {
       arms.push({shoulder,elbow,side});batchJoint(shoulder);batchJoint(elbow);
     }
     batchJoint(head);batchJoint(body);
-    return (time:number,hp:number,flash:number) => {
+    return (time:number,hp:number,flash:number,walking=false) => {
+      for (const leg of legs) leg.pivot.rotation.x=walking?Math.sin(time*1.8)*.11*leg.side:0;
       // Visual secondary motion; gameplay hooks and reactor stay in their original positions.
       head.rotation.y=hp>0?Math.sin(time*.45)*.055:.15;
       head.rotation.x=hp>0?(flash>0?-.08:0):.2;
       for(const {shoulder,elbow,side} of arms){
+        shoulder.rotation.x=walking?-Math.sin(time*1.8)*.11*side:0;
         shoulder.rotation.z=-side*(.035+Math.sin(time*.8)*.014);
         elbow.rotation.x=hp>0?-.12+Math.sin(time*.65+side)*.025:.15;
       }

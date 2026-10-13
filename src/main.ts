@@ -1,3 +1,4 @@
+import { stageConfig, giantPose, giantPoint, type StageId } from './stage-config';
 import { chooseAttack, attackVelocity, guideAttack, sweptWeakpointHit, impactVelocity, type AttackKind } from './combat';
 import { createAppMenu, type GameSettings } from './app-menu';
 import {
@@ -29,6 +30,9 @@ import { nearestVisibleWireTarget, type VisibleWireTarget } from "./wire-targeti
 import { resolveFlightCollision } from "./flight-collision";
 import "./style.css";
 
+const stageId: StageId = new URLSearchParams(location.search).get("stage") === "2" ? 2 : 1;
+const stage = stageConfig(stageId);
+
 type AnchorKind = "building" | "giant" | "course";
 
 type Anchor = {
@@ -37,6 +41,8 @@ type Anchor = {
   position: Vector3;
   mesh: Mesh;
   courseIndex?: number;
+  giantLocal?: [number, number, number];
+  motionDelta?: Vector3;
 };
 
 type Building = {
@@ -100,7 +106,7 @@ const art = createComicArt(scene, buildingFinishes);
 
 const camera = new UniversalCamera("follow-camera", new Vector3(-84, 8, -98), scene);
 camera.minZ = 0.2;
-camera.maxZ = 420;
+camera.maxZ = stageId === 2 ? 900 : 420;
 camera.fov = 0.9;
 camera.inputs.clear();
 
@@ -110,7 +116,7 @@ hemi.diffuse = new Color3(1, .97, .9);
 hemi.groundColor = new Color3(.28, .40, .62);
 
 const sun = new DirectionalLight("city-sun", SUN_DIRECTION.negate(), scene);
-sun.position = new Vector3(-80, 150, -100);
+sun.position = new Vector3(-80*stage.worldScale, 150*stage.heightScale, -100*stage.worldScale);
 sun.intensity = 0.48;
 
 const hex = (value: string): Color3 => Color3.FromHexString(value);
@@ -131,9 +137,9 @@ const weakpointMaterial = material("weakpoint-material", COMIC.yellow, "#6a5010"
 const markerMaterial = material("target-marker-material", COMIC.cream, "#756e5d");
 const markerGiantMaterial = markerMaterial;
 
-const updateSky = createCitySky(scene);
+const updateSky = createCitySky(scene, stage.worldScale);
 
-const ground = MeshBuilder.CreateBox("arena-ground", { width: 240, height: 1, depth: 240 }, scene);
+const ground = MeshBuilder.CreateBox("arena-ground", { width: stage.halfExtent*2, height: 1, depth: stage.halfExtent*2 }, scene);
 ground.position.y = -0.5;
 ground.material = groundMaterial;
 ground.isPickable = false;
@@ -142,21 +148,15 @@ ground.receiveShadows = true;
 const buildings: Building[] = [];
 const anchors: Anchor[] = [];
 const wallMaterials = createWallMaterials(scene);
-const buildingLayouts: Array<[number, number, number, number, number]> = [
-  [-62, -72, 9, 8, 14], [-38, -72, 10, 8, 21], [38, -72, 10, 8, 17], [62, -72, 9, 8, 25],
-  [-70, -40, 12, 9, 18], [-42, -40, 9, 11, 27], [42, -40, 12, 10, 21], [70, -40, 10, 8, 13],
-  [-70, 0, 13, 10, 23], [-42, 2, 10, 9, 15], [42, 1, 11, 12, 24], [70, 4, 8, 9, 18],
-  [-70, 40, 11, 10, 16], [-42, 42, 10, 8, 22], [42, 39, 12, 9, 28], [70, 38, 9, 11, 18],
-  [-62, 72, 13, 9, 20], [-30, 72, 10, 11, 15], [30, 72, 10, 11, 24], [62, 72, 12, 10, 24],
-];
+const buildingLayouts = stage.lots;
 
 const cityStreets = createCityStreets(scene, buildingLayouts, [
-  [-22, -96, 22, -80], // Launch building is not part of the repeating lots.
-  ...COURSE_ANCHORS.map(([x, , z]): [number, number, number, number] => {
+  [-22, stage.launchZ-8, 22, stage.launchZ+8], // Launch building is not part of the repeating lots.
+  ...(stageId === 1 ? COURSE_ANCHORS : []).map(([x, , z]): [number, number, number, number] => {
     const supportX = x >= 0 ? 26 : -26;
     return [supportX - 2, z - 3, supportX + 2, z + 3];
   }),
-]);
+], stage.worldScale);
 
 for (let index = 0; index < buildingLayouts.length; index += 1) {
   const [x, z, halfX, halfZ, height] = buildingLayouts[index];
@@ -175,14 +175,14 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   buildings.push({ mesh: building, x, z, halfX, halfZ, top: height });
 }
 
-const openingRoof = createBuildingShell("opening-roof", 22, 8, 40, 1, scene);
-openingRoof.position = new Vector3(0, 0, -88);
+const openingRoof = createBuildingShell("opening-roof", 22, 8, stage.launchHeight, 1, scene);
+openingRoof.position = new Vector3(0, 0, stage.launchZ);
 openingRoof.material = wallMaterials[1];
 // Keep the cap above the wall top (40m), below the launch markings (40.025m).
-createRoofDeck("roof-opening", 0, -88, 22, 8, 39.732, buildingFinishes[1].roof, scene);
-buildings.push({ mesh: openingRoof, x: 0, z: -88, halfX: 22, halfZ: 8, top: 40 });
+createRoofDeck("roof-opening", 0, stage.launchZ, 22, 8, stage.launchHeight-.268, buildingFinishes[1].roof, scene);
+buildings.push({ mesh: openingRoof, x: 0, z: stage.launchZ, halfX: 22, halfZ: 8, top: stage.launchHeight });
 
-const courseAnchorPositions = COURSE_ANCHORS.map(([x, y, z]) => new Vector3(x, y, z));
+const courseAnchorPositions = (stageId === 1 ? COURSE_ANCHORS : []).map(([x, y, z]) => new Vector3(x, y, z));
 const courseSupportMaterial = material("course-support-material", COMIC.blue);
 for (let index = 0; index < courseAnchorPositions.length; index += 1) {
   const point = courseAnchorPositions[index];
@@ -199,10 +199,12 @@ for (let index = 0; index < courseAnchorPositions.length; index += 1) {
 }
 
 const giantRoot = new TransformNode("giant-root", scene);
-giantRoot.position = new Vector3(15, 0, 48);
+giantRoot.position = stageId === 1 ? new Vector3(15, 0, 48) : new Vector3(...giantPose(0).position);
+giantRoot.scaling.setAll(stage.giantScale);
+giantRoot.rotation.y = stageId === 1 ? 0 : giantPose(0).yaw;
 
-const animateGiant = art.createGiant(giantRoot);
-art.decorateCity(buildingLayouts, cityStreets.landscape.patches);
+const animateGiant = art.createGiant(giantRoot, stageId === 2);
+art.decorateCity(buildingLayouts, cityStreets.landscape.patches, { worldScale:stage.worldScale, heightScale:stage.heightScale, course:stageId === 1 });
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
 const staticLots = buildings.map(({ mesh }) => mesh);
@@ -250,7 +252,7 @@ const cityShadowMap = cityShadows.getShadowMap();
 if (cityShadowMap) cityShadowMap.refreshRate = 0;
 
 const weakpoint = MeshBuilder.CreateSphere("giant-weakpoint", { diameter: 2.15, segments: 12 }, scene);
-weakpoint.position = giantRoot.position.add(new Vector3(0, 14, -3.45));
+weakpoint.position = new Vector3(...giantPoint([0,14,-3.45], {position:giantRoot.position.asArray() as [number,number,number],yaw:giantRoot.rotation.y}, stage.giantScale));
 weakpoint.material = weakpointMaterial;
 weakpoint.isPickable = false;
 const weakpointRing = MeshBuilder.CreateTorus("giant-weakpoint-ring", { diameter: 4.2, thickness: 0.16, tessellation: 24 }, scene);
@@ -259,18 +261,14 @@ weakpointRing.rotation.x = Math.PI / 2;
 weakpointRing.material = weakpointMaterial;
 weakpointRing.isPickable = false;
 
-const createAnchor = (name: string, position: Vector3): void => {
-  const anchorMesh = MeshBuilder.CreateSphere(name, { diameter: 1.45, segments: 10 }, scene);
-  anchorMesh.position = position.clone();
-  anchorMesh.material = anchorGiantMaterial;
-  anchorMesh.isPickable = false;
-  anchors.push({ name, kind: "giant", position: position.clone(), mesh: anchorMesh });
+const createAnchor = (name: string, local: [number,number,number]): void => {
+  const position = new Vector3(...giantPoint(local, {position:giantRoot.position.asArray() as [number,number,number],yaw:giantRoot.rotation.y}, stage.giantScale));
+  const anchorMesh = MeshBuilder.CreateSphere(name, { diameter: 1.45*stage.giantScale, segments: 10 }, scene);
+  anchorMesh.position = position.clone(); anchorMesh.material = anchorGiantMaterial; anchorMesh.isPickable = false;
+  anchors.push({ name, kind:"giant", position:position.clone(), mesh:anchorMesh, giantLocal:local, motionDelta:Vector3.Zero() });
 };
-
-createAnchor("巨人・左肩", giantRoot.position.add(new Vector3(-7, 16, 0)));
-createAnchor("巨人・右肩", giantRoot.position.add(new Vector3(7, 16, 0)));
-createAnchor("巨人・胸部", giantRoot.position.add(new Vector3(0, 12, -4)));
-createAnchor("巨人・頭上", giantRoot.position.add(new Vector3(0, 23, 0)));
+createAnchor("巨人・左肩", [-7,16,0]); createAnchor("巨人・右肩", [7,16,0]);
+createAnchor("巨人・胸部", [0,12,-4]); createAnchor("巨人・頭上", [0,23,0]);
 
 const marker = MeshBuilder.CreateTorus("selected-anchor-marker", { diameter: 3.1, thickness: 0.16, tessellation: 24 }, scene);
 marker.rotation.x = Math.PI / 2;
@@ -278,16 +276,12 @@ marker.material = markerMaterial;
 marker.isPickable = false;
 marker.setEnabled(false);
 
-const spawnPosition = new Vector3(0, 41.15, -86);
+const spawnPosition = new Vector3(...stage.spawn);
 const player = new TransformNode("player", scene);
 player.position = spawnPosition.clone();
 const animateHero = art.createHero(player);
 
-const coinPositions: Vector3[] = [
-  new Vector3(-77, 15, -72), new Vector3(-58, 20, -58), new Vector3(-39, 26, -47), new Vector3(-20, 20, -37),
-  new Vector3(0, 25, -27), new Vector3(20, 28, -16), new Vector3(37, 23, -3), new Vector3(46, 27, 14),
-  new Vector3(37, 30, 31), new Vector3(24, 23, 45), new Vector3(7, 23, 57), new Vector3(-13, 20, 65),
-];
+const coinPositions = stage.coins.map(position => new Vector3(...position));
 const coins: Coin[] = [];
 for (let index = 0; index < coinPositions.length; index += 1) {
   const coin = MeshBuilder.CreateTorus(`coin-${index + 1}`, { diameter: 1.85, thickness: 0.25, tessellation: 18 }, scene);
@@ -329,7 +323,9 @@ let specialAttack: { kind: "rush" | "dive"; remaining: number } | null = null;
 let lastAttack: AttackKind | null = null;
 let safePositionTimer = 0;
 let messageTimer = 0;
-let courseStage = 0;
+let courseStage = stageId === 1 ? 0 : 3;
+let giantClock = 0;
+const weakpointDelta = Vector3.Zero();
 let courseStarted = false;
 let previousPhysicsZ = spawnPosition.z;
 let boostTimer = 0;
@@ -595,7 +591,7 @@ const resetStage = (): void => {
   coinsCollected = progress.collectedCount;
   giantHp = progress.giantHp;
   attackCooldown = progress.attackCooldown;
-  courseStage = 0;
+  courseStage = stageId === 1 ? 0 : 3;
   courseStarted = false;
   boostTimer = 0;
   boostCooldown = 0;
@@ -603,7 +599,9 @@ const resetStage = (): void => {
   specialAttack = null; lastAttack = null; player.rotation.x = 0;
   stageCleared = false;
   cameraYaw = 0;
-  cameraPitch = -0.12;
+  cameraPitch = stageId === 1 ? -.12 : -.45;
+  giantClock = 0; updateMovingGiant(0);
+  select<HTMLElement>(".brand span").textContent = `STAGE 0${stageId} / ${stageId === 1 ? "TUTORIAL" : "TITAN DISTRICT"}`;
   camera.position.copyFrom(spawnPosition.add(new Vector3(0, 2.05, 0)).subtract(viewDirection().scale(14)));
   camera.setTarget(spawnPosition.add(new Vector3(0, 2.05, 0)));
   clearScreen.classList.add("is-hidden");
@@ -612,7 +610,7 @@ const resetStage = (): void => {
     coin.mesh.setEnabled(true);
     coin.mesh.scaling.setAll(1);
   }
-  showMessage("画面内の最寄りフックへWIRE → NEXTで乗り換え", "normal");
+  showMessage(stageId === 1 ? "画面内の最寄りフックへWIRE → NEXTで乗り換え" : "STAGE 2 / 巡回する巨人を追い、コイン8枚と巨人撃破！", "normal");
 };
 
 const updateHud = (): void => {
@@ -721,7 +719,23 @@ const updateCandidateMarker = (dt: number): void => {
   marker.scaling.setAll(attachedAnchor ? 1.18 : 1);
 };
 
+const updateMovingGiant = (dt: number): void => {
+  if (stageId === 2 && giantHp > 0) giantClock += dt;
+  const pose = stageId === 2 ? giantPose(giantClock) : { position:[15,0,48] as [number,number,number], yaw:0 };
+  giantRoot.position.copyFromFloats(...pose.position); giantRoot.rotation.y = pose.yaw;
+  const previousWeakpoint = weakpoint.position.clone();
+  weakpoint.position.copyFromFloats(...giantPoint([0,14,-3.45], pose, stage.giantScale));
+  weakpointDelta.copyFrom(weakpoint.position.subtract(previousWeakpoint));
+  weakpointRing.position.copyFrom(weakpoint.position); weakpointRing.rotation.y = pose.yaw;
+  weakpoint.scaling.setAll(stage.giantScale*(weakpointFlash > 0 ? 1.35 : 1)); weakpointRing.scaling.setAll(stage.giantScale*(weakpointFlash > 0 ? 1.18 : 1));
+  for (const anchor of anchors) if (anchor.giantLocal) {
+    const previous = anchor.position.clone();
+    anchor.position.copyFromFloats(...giantPoint(anchor.giantLocal, pose, stage.giantScale));
+    anchor.motionDelta!.copyFrom(anchor.position.subtract(previous)); anchor.mesh.position.copyFrom(anchor.position);
+  }
+};
 const updatePhysicsStep = (dt: number): void => {
+  updateMovingGiant(dt);
   boostTimer = Math.max(0, boostTimer - dt);
   boostCooldown = Math.max(0, boostCooldown - dt);
   if (boostTimer <= 0) boosting = false;
@@ -739,9 +753,14 @@ const updatePhysicsStep = (dt: number): void => {
   }
   if (attachedAnchor) {
     const forward = viewDirection();
-    stepAttached(flightState, [attachedAnchor.position.x, attachedAnchor.position.y, attachedAnchor.position.z],
+    const delta = attachedAnchor.motionDelta ?? Vector3.Zero();
+    const anchorVelocity = delta.scale(1/Math.max(dt,.000001));
+    flightState.velocity[0] -= anchorVelocity.x; flightState.velocity[1] -= anchorVelocity.y; flightState.velocity[2] -= anchorVelocity.z;
+    stepAttached(flightState, [attachedAnchor.position.x-delta.x, attachedAnchor.position.y-delta.y, attachedAnchor.position.z-delta.z],
       [movement.x, 0, movement.z], dt, isBoosting(), -Infinity,
       [forward.x, Math.max(0, forward.y), forward.z]);
+    flightState.position[0] += delta.x; flightState.position[1] += delta.y; flightState.position[2] += delta.z;
+    flightState.velocity[0] += anchorVelocity.x; flightState.velocity[1] += anchorVelocity.y; flightState.velocity[2] += anchorVelocity.z;
   } else if (grounded) {
     const desiredX = movement.x * (isBoosting() ? 18 : 13);
     const desiredZ = movement.z * (isBoosting() ? 18 : 13);
@@ -766,7 +785,7 @@ const updatePhysicsStep = (dt: number): void => {
   grounded = flightState.grounded;
   if (specialAttack) {
     const blocked = segmentBlocked(new Vector3(...previous), playerPosition);
-    if (!blocked && !touched && sweptWeakpointHit(previous, [playerPosition.x,playerPosition.y,playerPosition.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z])) {
+    if (!blocked && !touched && sweptWeakpointHit([previous[0]-weakpoint.position.x+weakpointDelta.x,previous[1]-weakpoint.position.y+weakpointDelta.y,previous[2]-weakpoint.position.z+weakpointDelta.z], [playerPosition.x-weakpoint.position.x,playerPosition.y-weakpoint.position.y,playerPosition.z-weakpoint.position.z], [0,0,0])) {
       const kind = specialAttack.kind; specialAttack = null;
       // The cooldown was reserved at launch; only physical contact deals damage.
       damageGiant(progress, 2); giantHp = progress.giantHp;
@@ -784,7 +803,7 @@ const updatePhysicsStep = (dt: number): void => {
     showMessage(grounded ? "着地 / ワイヤー解除" : "壁に接触 / ワイヤー解除", "normal");
   }
 
-  if (Math.abs(playerPosition.x) > 116 || Math.abs(playerPosition.z) > 116 || playerPosition.y < -18) respawn();
+  if (Math.abs(playerPosition.x) > stage.playableHalfExtent || Math.abs(playerPosition.z) > stage.playableHalfExtent || playerPosition.y < -18) respawn();
   player.position.copyFrom(playerPosition);
   if (velocity.lengthSquared() > 0.1) player.rotation.y = Math.atan2(velocity.x, velocity.z);
   const speed = velocity.length();
@@ -809,7 +828,7 @@ const updateOpeningCourse = (): void => {
   }
   if (courseStarted && grounded && courseStage < 3) {
     courseStarted = false;
-    courseStage = 0;
+    courseStage = stageId === 1 ? 0 : 3;
     showMessage("着地したためコースをリセット", "warn");
   }
 };
@@ -822,8 +841,8 @@ const updateWorld = (dt: number): void => {
   }
   weakpointRing.rotation.z += dt * 1.7;
   weakpointFlash = Math.max(0, weakpointFlash - dt);
-  weakpoint.scaling.setAll(weakpointFlash > 0 ? 1.35 : 1);
-  weakpointRing.scaling.setAll(weakpointFlash > 0 ? 1.18 : 1);
+  weakpoint.scaling.setAll(stage.giantScale*(weakpointFlash > 0 ? 1.35 : 1));
+  weakpointRing.scaling.setAll(stage.giantScale*(weakpointFlash > 0 ? 1.18 : 1));
   tickAttackCooldown(progress, dt);
   attackCooldown = progress.attackCooldown;
   collectCoins();
@@ -980,7 +999,10 @@ const applySettings = (settings: GameSettings): void => {
   speedLines.style.display = settings.speedLines ? '' : 'none';
 };
 resetStage();
-appMenu = createAppMenu({ start: resetStage, resetInput: resetPointersAndKeys, settings: applySettings });
+appMenu = createAppMenu({ initialStage:stageId, autoStart:new URLSearchParams(location.search).get("play") === "1", start: (id) => {
+  if (id === stageId) { resetStage(); return true; }
+  const url = new URL(location.href); url.searchParams.set("stage", String(id)); url.searchParams.set("play", "1"); location.assign(url.href); return false;
+}, resetInput: resetPointersAndKeys, settings: applySettings });
 let lastMenuRender = 0;
 let previousTime = performance.now();
 engine.runRenderLoop(() => {
@@ -1005,7 +1027,7 @@ engine.runRenderLoop(() => {
   const wireLean = wireOffset ? Math.atan2(wireOffset.x*Math.sin(player.rotation.y)+wireOffset.z*Math.cos(player.rotation.y), Math.max(.5,wireOffset.y)) : 0;
   player.rotation.x = approach(player.rotation.x, specialAttack?.kind === "dive" ? .85 : specialAttack?.kind === "rush" ? .35 : 0, dt * 4);
   animateHero(dt, velocity.length(), grounded, !!attachedAnchor, wireLean);
-  animateGiant(now / 1000, giantHp, weakpointFlash);
+  animateGiant(stageId === 2 ? giantClock : now / 1000, giantHp, weakpointFlash, stageId === 2 && giantHp > 0);
   weakpoint.setEnabled(giantHp > 0);
   weakpointRing.setEnabled(giantHp > 0);
   scene.render();
@@ -1016,6 +1038,8 @@ window.addEventListener("resize", () => engine.resize());
 // Read-only development diagnostics for real input and rendering QA. No production API.
 if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
+    giantHooks:anchors.filter(anchor=>anchor.kind === "giant").map(anchor=>({name:anchor.name,position:anchor.position.asArray()})),
+    stageId, giantClock, giantPosition:giantRoot.position.asArray(), giantYaw:giantRoot.rotation.y, giantScale:giantRoot.scaling.asArray(), heroScale:player.scaling.asArray(), weakpoint:weakpoint.position.asArray(), halfExtent:stage.halfExtent, launchHeight:stage.launchHeight, buildingTops:buildingLayouts.map(lot=>lot[4]),
     cameraYaw, cameraPitch,
     screen: document.querySelector("#game-shell")?.getAttribute("data-screen"), settings: appMenu.getSettings(),
     position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, recoveryRemaining: flightState.recoveryRemaining ?? 0, candidateDistance, speed: velocity.length(), grounded,

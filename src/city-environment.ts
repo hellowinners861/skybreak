@@ -11,12 +11,12 @@ import {
 // A local, art-directed atmosphere. One opaque sky draw; no ray marching or post-process.
 export const HORIZON = new Color3(0.77, 0.86, 0.88);
 export const SUN_DIRECTION = new Vector3(0.35, 1, -0.42).normalize();
-export function createCitySky(scene: Scene) {
+export function createCitySky(scene: Scene, worldScale = 1) {
   scene.fogMode = Scene.FOGMODE_LINEAR;
-  scene.fogStart = 95;
-  scene.fogEnd = 330;
+  scene.fogStart = 95*worldScale;
+  scene.fogEnd = 330*worldScale;
   scene.fogColor = HORIZON;
-  const sky = MeshBuilder.CreateBox("painted-sky", { size: 500 }, scene);
+  const sky = MeshBuilder.CreateBox("painted-sky", { size: 500*worldScale }, scene);
   const material = new ShaderMaterial(
     "painted-atmosphere",
     scene,
