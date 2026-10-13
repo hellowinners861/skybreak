@@ -82,7 +82,9 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
     return mesh;
   };
 
-  const decorateCity = (lots: CityLot[], groundPatches: GroundPatch[] = []) => {
+  const decorateCity = (lots: CityLot[], groundPatches: GroundPatch[] = [], options: { worldScale?: number; heightScale?: number; course?: boolean } = {}) => {
+    const worldScale = options.worldScale ?? 1, heightScale = options.heightScale ?? 1;
+    const launchZ = -88*worldScale, launchHeight = 40*heightScale;
     lots.forEach(([x, z, hx, hz, h], i) => {
       const finish = finishes[i % 3];
       // Architectural families share their trim, glazing, roof and service metal.
@@ -92,8 +94,8 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       }
       const residential = i % 3 === 0;
       const modern = i % 3 === 1;
-      decorateFacadeColumns(scene, [x,z,hx,hz,h], i, finishes, (mesh, mat) => { const group=batches.get(mat)??[];group.push(mesh);batches.set(mat,group); });
-      for (let y = 6; y < h - 1; y += 4) {
+      decorateFacadeColumns(scene, [x,z,hx,hz,h], i, finishes, (mesh, mat) => { const group=batches.get(mat)??[];group.push(mesh);batches.set(mat,group); }, heightScale > 1 ? 2 : 1);
+      for (let y = 6; y < h - 1; y += (heightScale > 1 ? 8 : 4)) {
         if (!modern) box(`floor-${i}`, [hx * 2 + .1, .18, hz * 2 + .1], [x, y - 1.35, z], finish.trim, undefined, true);
         for (const column of facadeColumns(hx, modern ? 2.5 : 3.2)) {
           for (const face of [-1, 1]) {
@@ -144,8 +146,8 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
       for(const side of [-1,1]) {
         // Reuse four of the existing trees in the rear park; no extra crowns.
         const parkTree = i >= 16 && i < 20 && side === 1;
-        const tx = parkTree ? [-70,-41,41,70][i-16] : x+side*(hx+1.2);
-        const tz = parkTree ? 103 : z-hz+2;
+        const tx = parkTree ? [-70,-41,41,70][i-16]*worldScale : x+side*(hx+1.2);
+        const tz = parkTree ? 103*worldScale : z-hz+2;
         box("tree-trunk", [.35,3.2,.35], [tx,1.7,tz], ink,undefined,true);
         rounded("tree-crown", [1.55,2.1,1.45], [tx,4.2,tz], foliage);
         rounded("tree-crown-light", [1.2,1.5,1.15], [tx-.45,5,tz-.25], foliageLight);
@@ -171,7 +173,7 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
         }
       }
       box("antenna", [.18, 4, .18], [x + hx / 2, h + 2.3, z - hz / 2], ink, undefined, true);
-      if (i % 4 === 0) sign(["AIR POST", "SKY PORT", "NORTH 01", "UP / UP", "FLY CLUB"][i / 4], [x, h - 2, z - hz - .3], hx * 1.6, 2, COMIC.yellow);
+      if (i % 4 === 0) sign(["AIR POST", "SKY PORT", "NORTH 01", "UP / UP", "FLY CLUB"][(i / 4)%5], [x, h - 2, z - hz - .3], hx * 1.6, 2, COMIC.yellow);
     });
     // Restrained, knee-high planting; all clumps fit inside clipped garden beds.
     // Keep decorative planting out of the road, doors and course support bases.
@@ -188,40 +190,40 @@ export function createComicArt(scene: Scene, finishes: ReturnType<typeof createB
     // Skyline outside the playable bounds, with a deliberately softer contrast.
     for (let layer=0;layer<2;layer++) for (let i=0;i<36;i++) {
       const angle=i/36*Math.PI*2;
-      const radius=layer ? 235 : 175;
+      const radius=(layer ? 235 : 175)*worldScale;
       const x=Math.cos(angle)*radius, z=Math.sin(angle)*radius;
-      const height=22+(i*19%52), mat=layer ? farCity : distant;
+      const height=(22+(i*19%52))*heightScale, mat=layer ? farCity : distant;
       box("skyline-podium", [14, height*.7, 16], [x,height*.35-8,z],mat,undefined,true);
       box("skyline-tower", [10,height*.3+4,11], [x,height*.85-6,z],mat,undefined,true);
       if(i%3===0) box("skyline-spire", [1.2,9,1.2], [x,height+2,z],mat,undefined,true);
       if(layer===1 && i%3===0) rounded("distant-ridge", [48,12+i%5*3,24], [x,-5,z],hill);
     }
     // Dress the launch hub too: its 40m wall otherwise dominates the street view.
-    for (let y=4;y<39;y+=5) {
+    for (let y=4;y<launchHeight-1;y+=(heightScale > 1 ? 8 : 5)) {
       for (const side of [-1,1]) {
-        box("launch-facade-band", [44,.25,.15], [0,y-1.4,-88+side*8.08], cream,undefined,true);
+        box("launch-facade-band", [44,.25,.15], [0,y-1.4,launchZ+side*8.08], cream,undefined,true);
         for(let x=-18;x<=18;x+=4) {
-          box("launch-frame", [2.8,2.4,.16], [x,y,-88+side*8.16],finishes[1].frame,undefined,true);
-          box("launch-pane", [2.3,1.9,.18], [x,y,-88+side*8.26],finishes[1].glass,undefined,true);
-          box("launch-mullion", [.07,1.9,.07], [x,y,-88+side*8.4],finishes[1].frame,undefined,true);
+          box("launch-frame", [2.8,2.4,.16], [x,y,launchZ+side*8.16],finishes[1].frame,undefined,true);
+          box("launch-pane", [2.3,1.9,.18], [x,y,launchZ+side*8.26],finishes[1].glass,undefined,true);
+          box("launch-mullion", [.07,1.9,.07], [x,y,launchZ+side*8.4],finishes[1].frame,undefined,true);
         }
-        box("launch-side-band", [.15,.25,16], [side*22.08,y-1.4,-88],cream,undefined,true);
-        for(let z=-93;z<=-83;z+=4) {
+        box("launch-side-band", [.15,.25,16], [side*22.08,y-1.4,launchZ],cream,undefined,true);
+        for(let z=launchZ-5;z<=launchZ+5;z+=4) {
           box("launch-side-frame", [.16,2.4,2.8], [side*22.16,y,z],finishes[1].frame,undefined,true);
           box("launch-side-pane", [.18,1.9,2.3], [side*22.26,y,z],finishes[1].glass,undefined,true);
         }
       }
     }
-    for(const side of [-1,1]) box("launch-pier", [.65,39,.25], [side*20.5,19.5,-79.7],finishes[1].trim,undefined,true);
+    for(const side of [-1,1]) box("launch-pier", [.65,launchHeight-1,.25], [side*20.5,(launchHeight-1)/2,launchZ+8.3],finishes[1].trim,undefined,true);
     // The opening roof is a launch pad, not another anonymous box.
-    box("launch-pad", [10, .07, 7], [0, 40.06, -86], yellow, undefined, true);
+    box("launch-pad", [10, .07, 7], [0, launchHeight+.06, launchZ+2], yellow, undefined, true);
     for (const side of [-1, 1]) {
-      const arrow = box("launch-chevron", [2.6, .08, .5], [side * .85, 40.14, -83.5], ink, undefined, true);
+      const arrow = box("launch-chevron", [2.6, .08, .5], [side * .85, launchHeight+.14, launchZ+4.5], ink, undefined, true);
       arrow.rotation.y = side * -.65;
     }
-    for (let x = -20; x <= 20; x += 4) box("launch-edge", [2, .13, .65], [x, 40.08, -80.2], red, undefined, true);
-    sign("TAKE OFF", [-12, 41.5, -78.5], 4.5, 1.1, COMIC.cream);
-    for (const [i, [x, y, z]] of [[6,54,-62],[-6,54,-38],[6,54,-14]].entries()) {
+    for (let x = -20; x <= 20; x += 4) box("launch-edge", [2, .13, .65], [x, launchHeight+.08, launchZ+7.8], red, undefined, true);
+    sign("TAKE OFF", [-12, launchHeight+1.5, launchZ+9.5], 4.5, 1.1, COMIC.cream);
+    for (const [i, [x, y, z]] of (options.course === false ? [] : [[6,54,-62],[-6,54,-38],[6,54,-14]]).entries()) {
       const side = x > 0 ? 26 : -26;
       for (const edge of [-1,1]) {
         box("mast-rib", [.26,y-2,.26], [side+edge*1.8,(y-2)/2,z-3.08],cream,undefined,true);

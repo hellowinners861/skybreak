@@ -18,7 +18,9 @@ import creamUrl from "./assets/streets/sidewalk-cream.webp";
 import slateUrl from "./assets/streets/sidewalk-slate.webp";
 import brickUrl from "./assets/streets/sidewalk-brick.webp";
 
-export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints: GroundRect[] = []) {
+export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints: GroundRect[] = [], worldScale = 1) {
+  lots = lots.map(([x,z,hx,hz,h]) => [x/worldScale,z/worldScale,hx/worldScale,hz/worldScale,h]);
+  extraFootprints = extraFootprints.map(r => r.map(v => v/worldScale) as GroundRect);
   const textured = (name: string, url: string, metres: number) => {
     const texture = new Texture(
       url,
@@ -69,6 +71,7 @@ export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints
     height: number,
     material: Material,
   ) => {
+    x *= worldScale; z *= worldScale; width *= worldScale; depth *= worldScale;
     const mesh = MeshBuilder.CreateBox(name, { width, depth, height }, scene);
     const positions = mesh.getVerticesData(VertexBuffer.PositionKind)!;
     const normals = mesh.getVerticesData(VertexBuffer.NormalKind)!;
@@ -284,7 +287,7 @@ export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints
   const benchFrame = scene.getMaterialByName("comic-ink")!;
   for (const {x,z,alongZ} of landscape.benches) {
     const piece = (dx: number,dz: number,w: number,d: number,y: number,h: number,mat: Material) =>
-      slab("garden-bench", x+(alongZ?dz:dx), z+(alongZ?dx:dz), alongZ?d:w, alongZ?w:d, y, h, mat);
+      slab("garden-bench", x+(alongZ?dz:dx)/worldScale, z+(alongZ?dx:dz)/worldScale, (alongZ?d:w)/worldScale, (alongZ?w:d)/worldScale, y, h, mat);
     for (const side of [-1,1]) piece(side*.9,0,.16,.62,.59,.4,benchFrame);
     for (let i=0;i<3;i++) piece(0,-.23+i*.23,2.5,.18,.69,.12,benchSeat);
     piece(0,.33,2.5,.12,1.12,.28,benchSeat);
@@ -301,5 +304,7 @@ export function createCityStreets(scene: Scene, lots: CityLot[], extraFootprints
     merged.freezeWorldMatrix();
     meshes.push(merged);
   }
+  for (const patch of landscape.patches) patch.rect = patch.rect.map(v => v*worldScale) as GroundRect;
+  for (const bench of landscape.benches) { bench.x *= worldScale; bench.z *= worldScale; }
   return { meshes, asphalt, sidewalks, landscape };
 }
