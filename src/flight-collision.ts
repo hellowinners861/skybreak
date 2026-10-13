@@ -1,6 +1,6 @@
 import type { FlightState, FlightVec } from "./flight";
 
-export type FlightObstacle = { x: number; z: number; halfX: number; halfZ: number; top: number };
+export type FlightObstacle = { x: number; z: number; halfX: number; halfZ: number; top: number; bottom?: number };
 
 // Both swinging and free flight land on the same roofs and slide against the
 // same walls. The previous feet position distinguishes landing from a side hit.
@@ -18,13 +18,17 @@ export function resolveFlightCollision(
     touched = true;
   }
   for (const building of buildings) {
+    const bottom = building.bottom ?? 0;
     const overlapX = building.halfX + radius - Math.abs(next[0] - building.x);
     const overlapZ = building.halfZ + radius - Math.abs(next[2] - building.z);
-    if (overlapX <= 0 || overlapZ <= 0 || next[1] - halfHeight > building.top + .001 || next[1] + halfHeight <= 0) continue;
+    if (overlapX <= 0 || overlapZ <= 0 || next[1] - halfHeight > building.top + .001 || next[1] + halfHeight <= bottom) continue;
     if (previous[1] - halfHeight >= building.top - .001 && state.velocity[1] <= 0) {
       next[1] = building.top + halfHeight;
       state.velocity[1] = 0;
       state.grounded = true;
+    } else if (previous[1] + halfHeight <= bottom + .001 && state.velocity[1] > 0) {
+      next[1] = bottom - halfHeight;
+      state.velocity[1] = 0;
     } else if (overlapX < overlapZ) {
       const side = Math.sign(previous[0] - building.x) || Math.sign(next[0] - building.x) || 1;
       next[0] = building.x + side * (building.halfX + radius);
