@@ -1,3 +1,5 @@
+import { createStageStructures } from './stage-structures';
+import { TERRACE_FOOTPRINTS } from './stage-structure-plan';
 import { stageConfig, giantPose, giantPoint, type StageId } from './stage-config';
 import { chooseAttack, attackVelocity, guideAttack, sweptWeakpointHit, impactVelocity, type AttackKind } from './combat';
 import { createAppMenu, type GameSettings } from './app-menu';
@@ -52,6 +54,7 @@ type Building = {
   halfX: number;
   halfZ: number;
   top: number;
+  bottom?: number;
 };
 
 type Coin = {
@@ -151,6 +154,7 @@ const wallMaterials = createWallMaterials(scene);
 const buildingLayouts = stage.lots;
 
 const cityStreets = createCityStreets(scene, buildingLayouts, [
+  ...(stageId === 2 ? TERRACE_FOOTPRINTS : []),
   [-22, stage.launchZ-8, 22, stage.launchZ+8], // Launch building is not part of the repeating lots.
   ...(stageId === 1 ? COURSE_ANCHORS : []).map(([x, , z]): [number, number, number, number] => {
     const supportX = x >= 0 ? 26 : -26;
@@ -174,6 +178,10 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   anchors.push({ name: `ビル ${String(index + 1).padStart(2, "0")}`, kind: "building", position: anchorPosition.clone(), mesh: anchorMesh });
   buildings.push({ mesh: building, x, z, halfX, halfZ, top: height });
 }
+
+const structures = stageId === 2 ? createStageStructures(scene, wallMaterials, buildingFinishes, anchorMaterial) : {meshes:[],obstacles:[],anchors:[]};
+buildings.push(...structures.obstacles);
+anchors.push(...structures.anchors.map(anchor => ({...anchor,kind:'building' as const})));
 
 const openingRoof = createBuildingShell("opening-roof", 22, 8, stage.launchHeight, 1, scene);
 openingRoof.position = new Vector3(0, 0, stage.launchZ);
@@ -207,7 +215,7 @@ const animateGiant = art.createGiant(giantRoot, stageId === 2);
 art.decorateCity(buildingLayouts, cityStreets.landscape.patches, { worldScale:stage.worldScale, heightScale:stage.heightScale, course:stageId === 1 });
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
-const staticLots = buildings.map(({ mesh }) => mesh);
+const staticLots = [...new Set([...buildings.map(({ mesh }) => mesh), ...structures.meshes])];
 const shellGroups = new Map<Material, Mesh[]>();
 for (const mesh of staticLots) {
   if (!mesh.material) throw new Error(`City shell has no material: ${mesh.name}`);
@@ -428,10 +436,10 @@ const segmentBlocked = (start: Vector3, end: Vector3, target?: Anchor): boolean 
     let tMax = 1;
     const axes: Array<[number, number, number]> = [
       [start.x, delta.x, building.x],
-      [start.y, delta.y, building.top / 2],
+      [start.y, delta.y, (building.top + (building.bottom ?? 0)) / 2],
       [start.z, delta.z, building.z],
     ];
-    const mins = [building.x - building.halfX, 0, building.z - building.halfZ];
+    const mins = [building.x - building.halfX, building.bottom ?? 0, building.z - building.halfZ];
     const maxs = [building.x + building.halfX, building.top, building.z + building.halfZ];
     for (let axis = 0; axis < 3; axis += 1) {
       const origin = axes[axis][0];
@@ -1040,6 +1048,7 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
     giantHooks:anchors.filter(anchor=>anchor.kind === "giant").map(anchor=>({name:anchor.name,position:anchor.position.asArray()})),
     stageId, giantClock, giantPosition:giantRoot.position.asArray(), giantYaw:giantRoot.rotation.y, giantScale:giantRoot.scaling.asArray(), heroScale:player.scaling.asArray(), weakpoint:weakpoint.position.asArray(), halfExtent:stage.halfExtent, launchHeight:stage.launchHeight, buildingTops:buildingLayouts.map(lot=>lot[4]),
+    structureAnchors: structures.anchors.map(a=>({name:a.name,position:a.position.asArray()})),
     cameraYaw, cameraPitch,
     screen: document.querySelector("#game-shell")?.getAttribute("data-screen"), settings: appMenu.getSettings(),
     position: playerPosition.asArray(), velocity: velocity.asArray(), ropeLength, recoveryRemaining: flightState.recoveryRemaining ?? 0, candidateDistance, speed: velocity.length(), grounded,

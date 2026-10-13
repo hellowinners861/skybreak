@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 mkdirSync(output, { recursive: true });
 execFileSync(process.execPath, [
   require.resolve("typescript/bin/tsc"),
-  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"), resolve(root, "src/stage-config.ts"),
+  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"), resolve(root, "src/stage-config.ts"), resolve(root, "src/stage-structure-plan.ts"),
   "--target", "ES2020", "--module", "ES2020", "--moduleResolution", "Bundler",
   "--outDir", output, "--skipLibCheck", "--pretty", "false",
 ], { cwd: root, stdio: "inherit" });
@@ -91,3 +91,20 @@ for(let t=0;t<126;t+=.1){
 for(const coin of two.coins) for(const [x,z,hx,hz,h] of two.lots)if(Math.abs(coin[0]-x)<hx &&Math.abs(coin[2]-z)<hz)assert.ok(coin[1]>h+1.15,'coins stay above roofs');
 assert.ok(combat.sweptWeakpointHit([-10,0,0],[10,0,0],[0,0,0]),'relative sweep detects a moving target crossing the player');
 console.log('stage verification: PASS (area/height/giant ratios, patrol clearance/speed/facing, moving hooks and rooftop coins)');
+
+const {BRIDGES,TERRACES,WATER_TOWERS}=await import(pathToFileURL(resolve(output,"stage-structure-plan.js")).href);
+const {stageConfig,giantPose}=await import(pathToFileURL(resolve(output,"stage-config.js")).href);
+const stage2Lots=stageConfig(2).lots;
+for(const bridge of BRIDGES) {
+  for(const z of [bridge.z-bridge.halfZ,bridge.z+bridge.halfZ]) {
+    assert.ok(stage2Lots.some(([x,lz,hx,hz,h])=>Math.abs(x-bridge.x)<hx && Math.abs(lz-z)<hz && h===bridge.top),"both bridge ends sit on equally high roofs");
+  }
+}
+for(const tower of WATER_TOWERS) assert.ok(stage2Lots.some(([x,z,hx,hz,h])=>x===tower.x&&z===tower.z&&h===tower.roof&&hx>=3.8&&hz>=3.8),"water tower fits its roof");
+for(let t=0;t<126;t+=.5) {
+  const [gx,,gz]=giantPose(t).position;
+  for(const b of [...BRIDGES,...TERRACES,...WATER_TOWERS.map(t=>({...t,halfX:3.8,halfZ:3.8}))]) {
+    assert.ok(Math.hypot(Math.max(0,Math.abs(gx-b.x)-b.halfX),Math.max(0,Math.abs(gz-b.z)-b.halfZ))>36,"new structures leave giant patrol clearance");
+  }
+}
+console.log("structures verification: PASS (supported bridges, towers within roofs, central patrol clearance)");

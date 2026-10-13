@@ -185,6 +185,24 @@ const simulate = (fps) => {
   return { reconnectSpeeds, minHeight: Math.min(...heights), elapsed };
 };
 
+// Elevated decks permit underflight, catch upward impacts, and support roof landings.
+const bridge={x:0,z:0,halfX:2.4,halfZ:24,bottom:71.4,top:72};
+const collisionState=(y,vy)=>({position:[0,y,0],velocity:[0,vy,0],grounded:false,attached:false,ropeLength:0});
+const under=collisionState(60,0);
+assert.equal(resolveFlightCollision(under,[0,60,0],[bridge]),false);
+assert.deepEqual(under.position,[0,60,0]);
+const underside=collisionState(70.4,6);
+assert.equal(resolveFlightCollision(underside,[0,69.8,0],[bridge]),true);
+assert.equal(underside.position[1],70.25);
+assert.equal(underside.velocity[1],0);
+assert.equal(underside.grounded,false);
+const landed=collisionState(73,-8);
+resolveFlightCollision(landed,[0,73.5,0],[bridge]);
+assert.equal(landed.position[1],73.15);
+assert.equal(landed.grounded,true);
+const wall=collisionState(71.8,0);wall.position[0]=2.7;wall.velocity[0]=-2;
+resolveFlightCollision(wall,[3.2,71.8,0],[bridge]);
+assert.equal(wall.position[0],2.96);assert.equal(wall.velocity[0],0);
 verifyInvariants();
 const runs = [30, 60, 120].map((fps) => [fps, simulate(fps)]);
 const reference = runs[1][1].reconnectSpeeds;
