@@ -21,7 +21,7 @@ export function createAppMenu(callbacks: { start: (stage: StageId) => boolean | 
   let returnView = 'title';
   let activeRun = false;
   let runCleared = false;
-  const completed: Record<StageId,boolean> = {1:read('skybreak.stage1.clear') === true,2:read('skybreak.stage2.clear') === true};
+  const completed: Record<StageId,boolean> = {1:read('skybreak.stage1.clear') === true,2:read('skybreak.stage2.clear') === true,3:read('skybreak.stage3.clear') === true};
   let currentStage: StageId = callbacks.initialStage ?? 1, pendingStage: StageId = currentStage;
   let settings = loadSettings();
   let audio: AudioContext | undefined;
@@ -40,10 +40,23 @@ export function createAppMenu(callbacks: { start: (stage: StageId) => boolean | 
       oscillator.connect(gain).connect(audio.destination); oscillator.start(now); oscillator.stop(now + .13);
     } catch { /* Audio support is optional. */ }
   };
+  let jetEngine: {oscillator: OscillatorNode; gain: GainNode; filter: BiquadFilterNode} | undefined;
+  const setJetAudio=(level:number)=>{
+    // Reuse the context unlocked by an actual UI gesture. No autoplay attempt.
+    if(!audio || audio.state !== 'running')return;
+    const volume=Math.max(0,Math.min(1,level))*settings.volume*.035;
+    if(!jetEngine && volume>0) {
+      const oscillator=audio.createOscillator(),gain=audio.createGain(),filter=audio.createBiquadFilter();
+      oscillator.type='sawtooth';oscillator.frequency.value=65;filter.type='lowpass';filter.frequency.value=450;gain.gain.value=0;
+      oscillator.connect(filter).connect(gain).connect(audio.destination);oscillator.start();jetEngine={oscillator,gain,filter};
+    }
+    if(jetEngine){jetEngine.gain.gain.setTargetAtTime(volume,audio.currentTime,.12);jetEngine.filter.frequency.setTargetAtTime(200+level*550,audio.currentTime,.2);}
+  };
   const button = (action: string, label: string, primary = false) => `<button type="button" data-menu="${action}" class="menu-button${primary ? ' primary' : ''}">${label}</button>`;
   const header = (eyebrow: string, title: string) => `<header class="menu-header"><div><span class="menu-kicker">${eyebrow}</span><h1>${title}</h1></div>${button('back', '← 戻る')}</header>`;
   const render = () => {
     const playing = view === 'playing';
+    if(!playing)setJetAudio(0);
     layer.hidden = playing;
     hud.hidden = !playing; touch.hidden = !playing;
     hud.inert = !playing; touch.inert = !playing;
@@ -53,10 +66,10 @@ export function createAppMenu(callbacks: { start: (stage: StageId) => boolean | 
     if (playing) { clear.classList.toggle('is-hidden', !runCleared); document.querySelector<HTMLCanvasElement>('#render-canvas')?.focus({ preventScroll: true }); return; }
     let content = '';
     if (view === 'title') content = `<div class="title-layout"><div class="title-copy"><span class="menu-kicker">WIRE ACTION / AIR DISTRICT</span><h1 class="title-logo">SKY<span>BREAK</span></h1><p class="title-tagline">街をつないで、空を飛べ。</p><p class="title-detail">ワイヤーで飛び回り、コインを集めて巨人に挑め。</p><span class="title-stamp">TOUCH TO FLY</span></div><nav class="title-nav" aria-label="メインメニュー">${button('start', (activeRun ? `ステージ${currentStage}を最初から` : 'ステージ1をはじめる') + ' <span>↗</span>', true)}${activeRun ? button('resume', 'プレイを続ける') : ''}${button('stages', 'ステージ選択')}${button('options', 'オプション')}${button('help', '遊び方')}<p class="menu-note">スマホ横画面推奨 · イヤホン対応</p></nav></div>`;
-    if (view === 'stages') content = `${header('CHOOSE YOUR SKY', 'ステージ選択')}<div class="stage-grid">${([1,2] as StageId[]).map(n=>`<button class="stage-card playable" type="button" data-menu="stage${n}"><span class="stage-number">0${n}</span><span class="stage-status">${completed[n] ? 'CLEAR ✓' : 'PLAYABLE'}</span><h2>${n===1?'はじめの飛行':'巨影の街'}</h2><p>${n===1?'チュートリアル<br>ワイヤー・コイン回収・巨人戦':'高層街区<br>巡回する巨大な巨人を追え'}</p><strong>プレイする ↗</strong></button>`).join('')}<button class="stage-card developing" type="button" data-menu="dev3"><span class="stage-number">03</span><span class="stage-status">COMING SOON</span><h2>ステージ3</h2><p>新しい空への準備中。</p><strong>開発中</strong></button></div><p class="menu-note">ステージ2：街の面積4倍、建物の高さ3倍、巨人の大きさ4倍。</p>`;
+    if (view === 'stages') content = `${header('CHOOSE YOUR SKY', 'ステージ選択')}<div class="stage-grid">${([1,2,3] as StageId[]).map(n=>`<button class="stage-card playable" type="button" data-menu="stage${n}"><span class="stage-number">0${n}</span><span class="stage-status">${completed[n] ? 'CLEAR ✓' : 'PLAYABLE'}</span><h2>${n===1?'はじめの飛行':n===2?'巨影の街':'天空の狩人'}</h2><p>${n===1?'チュートリアル<br>ワイヤー・コイン回収・巨人戦':n===2?'高層街区<br>巡回する巨大な巨人を追え':'戦闘機ワイヤー<br>高速移動から巨人へ飛び込め'}</p><strong>プレイする ↗</strong></button>`).join('')}</div><p class="menu-note">ステージ3：戦闘機で3秒以上移動＋巨人撃破でクリア。コインはボーナス。</p>`;
     if (view.startsWith('dev')) content = `${header('COMING SOON / STAGE ' + view.slice(3), '開発中')}<div class="coming-soon"><span class="stage-number">0${view.slice(3)}</span><h2>次の空を、準備しています。</h2><p>このステージはまだプレイできません。<br>まずはステージ1でワイヤーアクションを楽しもう。</p>${button('start', 'ステージ1をプレイ', true)}${button('stages', 'ステージ選択へ')}</div>`;
     if (view === 'options') content = `${header('MAKE IT YOURS', 'オプション')}<div class="options-grid"><label class="option-row"><span>カメラ感度 <output id="sensitivity-value">${settings.sensitivity.toFixed(1)}×</output></span><input id="camera-sensitivity" data-setting="sensitivity" type="range" min=".5" max="2" step=".1" value="${settings.sensitivity}" /></label><label class="option-row"><span>効果音の音量 <output id="volume-value">${Math.round(settings.volume * 100)}%</output></span><input id="sound-volume" data-setting="volume" type="range" min="0" max="1" step=".05" value="${settings.volume}" /></label><label class="option-row"><span>描画品質</span><select id="render-quality" data-setting="quality"><option value="low" ${settings.quality === 'low' ? 'selected' : ''}>軽量 · 解像度を抑える</option><option value="standard" ${settings.quality === 'standard' ? 'selected' : ''}>標準</option><option value="high" ${settings.quality === 'high' ? 'selected' : ''}>高画質 · 負荷が高め</option></select></label><label class="option-row toggle-row"><span>チュートリアルのカメラ補助<small>次のポイントを見やすくする</small></span><input data-setting="courseCamera" type="checkbox" ${settings.courseCamera ? 'checked' : ''} /></label><label class="option-row toggle-row"><span>スピード集中線<small>高速飛行時の画面エフェクト</small></span><input data-setting="speedLines" type="checkbox" ${settings.speedLines ? 'checked' : ''} /></label></div><footer class="menu-footer"><p class="menu-note">設定はこのブラウザに自動保存されます。</p>${button('defaults', '標準設定に戻す')}</footer>`;
-    if (view === 'help') content = `${header('HOW TO FLY', '遊び方')}<div class="help-grid"><article><h2>01 / 移動・カメラ</h2><p>左のMOVEで移動。右の空いた場所をスワイプしてカメラを動かします。</p></article><article><h2>02 / WIRE → NEXT</h2><p>画面内の最寄りの黄色い球へ接続。接続中はNEXTで次の点へ。RELEASEで勢いを保って解除。</p></article><article><h2>03 / BOOST・復帰</h2><p>BOOSTで加速。地面に落ちたら上を見てWIRE。短時間の巻き取りで上昇できます。</p></article><article><h2>04 / ステージ1の目標</h2><p>3ポイントの下を順番に通過し、コイン8枚と巨人撃破を目指そう。ステージ2では高層街で巡回する巨人を追います。高速で弱点へ向かうとRUSH、上から落下するとDIVE。ATTACKで発動し、命中時は2ダメージ。黄色い輪はコインです。</p></article></div><p class="menu-note">PC：WASD 移動 / ドラッグ カメラ / Space 接続 / Q 解除 / Shift 加速 / E 攻撃 / Esc 一時停止</p>`;
+    if (view === 'help') content = `${header('HOW TO FLY', '遊び方')}<div class="help-grid"><article><h2>01 / 移動・カメラ</h2><p>左のMOVEで移動。右の空いた場所をスワイプしてカメラを動かします。</p></article><article><h2>02 / WIRE → NEXT</h2><p>画面内の最寄りの黄色い球へ接続。接続中はNEXTで次の点へ。RELEASEで勢いを保って解除。</p></article><article><h2>03 / BOOST・復帰</h2><p>BOOSTで加速。地面に落ちたら上を見てWIRE。短時間の巻き取りで上昇できます。</p></article><article><h2>04 / ステージ1の目標</h2><p>3ポイントの下を順番に通過し、コイン8枚と巨人撃破を目指そう。ステージ2では高層街で巡回する巨人を追います。ステージ3は戦闘機の黄色い球へWIREで接続し、3秒以上移動＋巨人撃破でクリア。飛行機に射撃はなく、52秒で周回します。RELEASE後に巨人を見て、高速で弱点へ向かうとRUSH、上から落下するとDIVE。ATTACKで発動し、命中時は2ダメージ。黄色い輪はコインです。</p></article></div><p class="menu-note">PC：WASD 移動 / ドラッグ カメラ / Space 接続 / Q 解除 / Shift 加速 / E 攻撃 / Esc 一時停止</p>`;
     if (view === 'pause') content = `${header('TAKE A BREATH', '一時停止')}<div class="pause-actions">${button('resume', 'プレイを続ける', true)}${button('options', 'オプション')}${button('help', '遊び方')}${button('restart', `ステージ${currentStage}をやり直す`)}${button('title', 'タイトルへ戻る')}</div>`;
     if (view === 'confirm-restart') content = `${header('RETRY STAGE 0' + pendingStage, `ステージ${pendingStage}を最初から？`)}<p>今回のコイン・巨人戦・飛行の進み具合がリセットされます。</p><div class="pause-actions">${button('confirm-restart', 'やり直す', true)}${button('back', 'キャンセル')}</div>`;
     layer.innerHTML = `<div class="menu-panel ${view === 'title' ? 'title-panel' : ''}">${content}</div><div class="menu-version">SKYBREAK / STAGE 0${currentStage} · DEVELOPMENT BUILD</div>`;
@@ -73,7 +86,7 @@ export function createAppMenu(callbacks: { start: (stage: StageId) => boolean | 
     const target = (event.target as HTMLElement).closest<HTMLElement>('[data-menu]');
     if (!target) return;
     sound(); const action = target.dataset.menu!;
-    if (action === 'start' || action === 'stage1' || action === 'stage2') { pendingStage = action === 'stage2' ? 2 : action === 'stage1' ? 1 : activeRun ? currentStage : 1; if (activeRun) confirmRestart(); else startRun(); }
+    if (action === 'start' || action === 'stage1' || action === 'stage2' || action === 'stage3') { pendingStage = action === 'stage3' ? 3 : action === 'stage2' ? 2 : action === 'stage1' ? 1 : activeRun ? currentStage : 1; if (activeRun) confirmRestart(); else startRun(); }
     else if (action === 'restart') { pendingStage = currentStage; confirmRestart(); }
     else if (action === 'confirm-restart') startRun();
     else if (action === 'defaults') { settings = { ...defaults }; apply(); render(); }
@@ -98,5 +111,5 @@ export function createAppMenu(callbacks: { start: (stage: StageId) => boolean | 
   document.querySelector('#clear-stages')!.addEventListener('click', () => show('stages'));
   callbacks.settings(settings); render();
   if (callbacks.autoStart) { startRun(); const url=new URL(location.href);url.searchParams.delete('play');history.replaceState(null,'',url.href); }
-  return { isPlaying: () => view === 'playing', getSettings: () => settings, pause, restart: () => { pendingStage=currentStage;startRun(); }, confirmRestart: () => { pendingStage=currentStage;confirmRestart(); }, showTitle: () => show('title'), sound, markClear: () => { completed[currentStage] = true; activeRun = false; runCleared = true; save(`skybreak.stage${currentStage}.clear`, true); }, escape: () => { if (view === 'playing') pause(); else if (view === 'pause') show('playing'); else if (activeRun) show('pause'); else show('title'); } };
+  return { isPlaying: () => view === 'playing', getSettings: () => settings, pause, restart: () => { pendingStage=currentStage;startRun(); }, confirmRestart: () => { pendingStage=currentStage;confirmRestart(); }, setJetAudio, showTitle: () => show('title'), sound, markClear: () => { completed[currentStage] = true; activeRun = false; runCleared = true; save(`skybreak.stage${currentStage}.clear`, true); }, escape: () => { if (view === 'playing') pause(); else if (view === 'pause') show('playing'); else if (activeRun) show('pause'); else show('title'); } };
 }

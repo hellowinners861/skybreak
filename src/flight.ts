@@ -134,3 +134,27 @@ export const stepDetached = (state: FlightState, input: FlightVec, dt: number, b
   }
   state.grounded = false;
 };
+
+// A moving aircraft pulls through a damped elastic line. Forces are bounded,
+// so taking a moving hook never copies its velocity or teleports the player.
+export const stepTowed = (state: FlightState, anchor: FlightVec, anchorVelocity: FlightVec, input: FlightVec, dt: number, boosting: boolean, boostForward: FlightVec = [0,0,1]): void => {
+  let reelSpeed=0;
+  if ((state.recoveryRemaining ?? 0)>0) {
+    const reelDt=Math.min(dt,state.recoveryRemaining!),previousSpeed=state.reelSpeed??0;
+    state.reelSpeed=Math.min(18,previousSpeed+30*reelDt);
+    const shortened=Math.min(Math.max(0,state.ropeLength-2),(previousSpeed+state.reelSpeed)*.5*reelDt);
+    state.ropeLength-=shortened;reelSpeed=shortened/Math.max(.000001,dt);
+    state.recoveryRemaining=Math.max(0,state.recoveryRemaining!-dt);
+  }
+  stepDetached(state,input,dt,boosting,boostForward,-18,42,false);
+  const offset=state.position.map((v,i)=>v-anchor[i]) as FlightVec;
+  const stretch=length(offset)-state.ropeLength;
+  if(stretch>0) {
+    const radial=normalize(offset);
+    const relative=state.velocity.map((v,i)=>v-anchorVelocity[i]) as FlightVec;
+    const acceleration=Math.min(32,Math.max(0,3*stretch+4*(dot(relative,radial)+reelSpeed)));
+    state.velocity=state.velocity.map((v,i)=>v-radial[i]*acceleration*dt) as FlightVec;
+  }
+  state.position=state.position.map((v,i)=>v+state.velocity[i]*dt) as FlightVec;
+  state.grounded=false;
+};
