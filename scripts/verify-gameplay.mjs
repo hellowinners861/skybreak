@@ -11,7 +11,7 @@ const require = createRequire(import.meta.url);
 mkdirSync(output, { recursive: true });
 execFileSync(process.execPath, [
   require.resolve("typescript/bin/tsc"),
-  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"), resolve(root, "src/stage-config.ts"), resolve(root, "src/stage-structure-plan.ts"),
+  resolve(root, "src/gameplay.ts"), resolve(root, "src/combat.ts"), resolve(root, "src/stage-config.ts"), resolve(root, "src/stage-structure-plan.ts"), resolve(root, "src/jet-route.ts"),
   "--target", "ES2020", "--module", "ES2020", "--moduleResolution", "Bundler",
   "--outDir", output, "--skipLibCheck", "--pretty", "false",
 ], { cwd: root, stdio: "inherit" });
@@ -108,3 +108,21 @@ for(let t=0;t<126;t+=.5) {
   }
 }
 console.log("structures verification: PASS (supported bridges, towers within roofs, central patrol clearance)");
+
+const {jetPose,JET_PERIOD,jetMissionClear}=await import(pathToFileURL(resolve(output,"jet-route.js")).href);
+for(let t=0;t<JET_PERIOD;t+=.05) {
+  const p=jetPose(t),q=jetPose(t+JET_PERIOD),next=jetPose(t+.05);
+  assert.ok(p.position.every((v,i)=>Math.abs(v-q.position[i])<1e-8),"jet loop is seamless");
+  assert.ok(p.velocity.every((v,i)=>Math.abs(v-q.velocity[i])<1e-7),"velocity is seamless at loop boundary");
+  assert.ok(Math.hypot(...p.velocity)>5&&Math.hypot(...p.velocity)<34,"jet uses catchable, bounded speed");
+  assert.ok(Math.hypot(...next.velocity.map((v,i)=>(v-p.velocity[i])/.05))<10,"turns stay gentle");
+  assert.ok(Math.abs(p.bank)<.5,"bank is limited");
+  for(const [x,z,hx,hz,h]of stage2Lots.concat([[0,-176,22,8,120]])) {
+    if(Math.abs(x-p.position[0])<hx+9&&Math.abs(z-p.position[2])<hz+9)assert.ok(p.position[1]-4>h,"aircraft clears rooftops");
+  }
+}
+assert.equal(jetMissionClear(0,2.99),false);
+assert.equal(jetMissionClear(1,10),false);
+assert.equal(jetMissionClear(0,3),true);
+assert.deepEqual(stageConfig(3).lots,stageConfig(2).lots);
+console.log("jet verification: PASS (closed loop, speed, acceleration, bank, roof clearance and mission prerequisites)");

@@ -1,5 +1,5 @@
 import type { FlightVec } from './flight';
-export type StageId = 1 | 2;
+export type StageId = 1 | 2 | 3;
 export type StageLot = [number, number, number, number, number];
 export const BASE_LOTS: StageLot[] = [
   [-62,-72,9,8,14],[-38,-72,10,8,21],[38,-72,10,8,17],[62,-72,9,8,25],
@@ -11,10 +11,10 @@ export const BASE_LOTS: StageLot[] = [
 export const STAGE_ONE_COINS: FlightVec[] = [[-77,15,-72],[-58,20,-58],[-39,26,-47],[-20,20,-37],[0,25,-27],[20,28,-16],[37,23,-3],[46,27,14],[37,30,31],[24,23,45],[7,23,57],[-13,20,65]];
 export const STAGE_TWO_COINS: FlightVec[] = [[-76,67,-144],[-84,85,-80],[-90,74,0],[-84,72,84],[-100,74,144],[-22,62,95],[40,72,74],[84,90,78],[92,78,2],[84,70,-80],[60,79,-144],[5,65,-95]];
 export function stageConfig(id: StageId) {
-  const scale = id === 2 ? 2 : 1, height = id === 2 ? 3 : 1;
+  const scale = id !== 1 ? 2 : 1, height = id !== 1 ? 3 : 1;
   const lots: StageLot[] = BASE_LOTS.map(([x,z,hx,hz,h])=>[x*scale,z*scale,hx,hz,h*height]);
-  if (id === 2) for (const side of [-1,1]) for (const z of [-144,-80,80,144]) lots.push([side*210,z,9,9,72]);
-  return { id, worldScale: scale, heightScale: height, giantScale: id === 2 ? 4 : 1, halfExtent: 120*scale, playableHalfExtent:116*scale, launchHeight:40*height, launchZ:-88*scale, spawn:[0,40*height+1.15,-88*scale+2] as FlightVec, lots, coins:id===2?STAGE_TWO_COINS:STAGE_ONE_COINS };
+  if (id !== 1) for (const side of [-1,1]) for (const z of [-144,-80,80,144]) lots.push([side*210,z,9,9,72]);
+  return { id, worldScale: scale, heightScale: height, giantScale: id !== 1 ? 4 : 1, halfExtent: 120*scale, playableHalfExtent:116*scale, launchHeight:40*height, launchZ:-88*scale, spawn:[0,40*height+1.15,-88*scale+(id===3?6.5:2)] as FlightVec, lots, coins:id!==1?STAGE_TWO_COINS:STAGE_ONE_COINS };
 }
 export function giantPose(seconds: number) {
   const angle = seconds*.05;

@@ -1,3 +1,5 @@
+import { jetPose, jetMissionClear } from './jet-route';
+import { createJet } from './jet-model';
 import { createStageStructures } from './stage-structures';
 import { TERRACE_FOOTPRINTS } from './stage-structure-plan';
 import { stageConfig, giantPose, giantPoint, type StageId } from './stage-config';
@@ -22,7 +24,7 @@ import {
   Vector3,
 } from "@babylonjs/core";
 import { damageGiant, collectCoin, createProgressState, isStageClear, resetProgress, tickAttackCooldown, tryAttack } from "./gameplay";
-import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached } from "./flight";
+import { attachToAnchor, crossedCourseAnchor, COURSE_ANCHORS, FlightState, releaseFlight, stepAttached, stepDetached, stepTowed } from "./flight";
 import { COMIC, createComicArt } from "./comic-art";
 import { createBuildingShell, createCitySky, SUN_DIRECTION } from "./city-environment";
 import { createWallMaterials } from "./wall-materials";
@@ -32,10 +34,11 @@ import { nearestVisibleWireTarget, type VisibleWireTarget } from "./wire-targeti
 import { resolveFlightCollision } from "./flight-collision";
 import "./style.css";
 
-const stageId: StageId = new URLSearchParams(location.search).get("stage") === "2" ? 2 : 1;
+const requestedStage = Number(new URLSearchParams(location.search).get("stage"));
+const stageId: StageId = requestedStage === 3 ? 3 : requestedStage === 2 ? 2 : 1;
 const stage = stageConfig(stageId);
 
-type AnchorKind = "building" | "giant" | "course";
+type AnchorKind = "building" | "giant" | "course" | "jet";
 
 type Anchor = {
   name: string;
@@ -109,7 +112,7 @@ const art = createComicArt(scene, buildingFinishes);
 
 const camera = new UniversalCamera("follow-camera", new Vector3(-84, 8, -98), scene);
 camera.minZ = 0.2;
-camera.maxZ = stageId === 2 ? 900 : 420;
+camera.maxZ = stageId !== 1 ? 900 : 420;
 camera.fov = 0.9;
 camera.inputs.clear();
 
@@ -154,7 +157,7 @@ const wallMaterials = createWallMaterials(scene);
 const buildingLayouts = stage.lots;
 
 const cityStreets = createCityStreets(scene, buildingLayouts, [
-  ...(stageId === 2 ? TERRACE_FOOTPRINTS : []),
+  ...(stageId !== 1 ? TERRACE_FOOTPRINTS : []),
   [-22, stage.launchZ-8, 22, stage.launchZ+8], // Launch building is not part of the repeating lots.
   ...(stageId === 1 ? COURSE_ANCHORS : []).map(([x, , z]): [number, number, number, number] => {
     const supportX = x >= 0 ? 26 : -26;
@@ -179,7 +182,7 @@ for (let index = 0; index < buildingLayouts.length; index += 1) {
   buildings.push({ mesh: building, x, z, halfX, halfZ, top: height });
 }
 
-const structures = stageId === 2 ? createStageStructures(scene, wallMaterials, buildingFinishes, anchorMaterial) : {meshes:[],obstacles:[],anchors:[]};
+const structures = stageId !== 1 ? createStageStructures(scene, wallMaterials, buildingFinishes, anchorMaterial) : {meshes:[],obstacles:[],anchors:[]};
 buildings.push(...structures.obstacles);
 anchors.push(...structures.anchors.map(anchor => ({...anchor,kind:'building' as const})));
 
@@ -211,7 +214,7 @@ giantRoot.position = stageId === 1 ? new Vector3(15, 0, 48) : new Vector3(...gia
 giantRoot.scaling.setAll(stage.giantScale);
 giantRoot.rotation.y = stageId === 1 ? 0 : giantPose(0).yaw;
 
-const animateGiant = art.createGiant(giantRoot, stageId === 2);
+const animateGiant = art.createGiant(giantRoot, stageId !== 1);
 art.decorateCity(buildingLayouts, cityStreets.landscape.patches, { worldScale:stage.worldScale, heightScale:stage.heightScale, course:stageId === 1 });
 art.bake();
 // These are only render meshes. Collision uses the original immutable lot dimensions.
@@ -278,6 +281,14 @@ const createAnchor = (name: string, local: [number,number,number]): void => {
 createAnchor("巨人・左肩", [-7,16,0]); createAnchor("巨人・右肩", [7,16,0]);
 createAnchor("巨人・胸部", [0,12,-4]); createAnchor("巨人・頭上", [0,23,0]);
 
+const jetRoot = stageId === 3 ? createJet(scene) : null;
+const jetAnchor: Anchor | null = jetRoot ? (()=>{
+  const mesh=MeshBuilder.CreateSphere('jet-wire-hook',{diameter:1.7,segments:10},scene);
+  mesh.material=anchorMaterial;mesh.isPickable=false;
+  const anchor: Anchor={name:'戦闘機・機体下フック',kind:'jet',position:Vector3.Zero(),mesh,motionDelta:Vector3.Zero()};
+  anchors.push(anchor);return anchor;
+})() : null;
+
 const marker = MeshBuilder.CreateTorus("selected-anchor-marker", { diameter: 3.1, thickness: 0.16, tessellation: 24 }, scene);
 marker.rotation.x = Math.PI / 2;
 marker.material = markerMaterial;
@@ -333,6 +344,8 @@ let safePositionTimer = 0;
 let messageTimer = 0;
 let courseStage = stageId === 1 ? 0 : 3;
 let giantClock = 0;
+let jetClock = 0;
+let jetRideSeconds = 0;
 const weakpointDelta = Vector3.Zero();
 let courseStarted = false;
 let previousPhysicsZ = spawnPosition.z;
@@ -506,6 +519,7 @@ const toggleWire = (): void => {
   attachToAnchor(flightState, [candidateAnchor.position.x, candidateAnchor.position.y, candidateAnchor.position.z], [camera.getForwardRay(1).direction.x, 0, camera.getForwardRay(1).direction.z]);
   playerPosition.copyFromFloats(...flightState.position);
   velocity.copyFromFloats(...flightState.velocity);
+  if(candidateAnchor.kind === "jet" && !flightState.recoveryRemaining) flightState.ropeLength += 3; // brief slack before tension builds
   ropeLength = flightState.ropeLength;
   grounded = flightState.grounded;
   if (candidateAnchor.kind === "course" && candidateAnchor.courseIndex === courseStage) courseStarted = true;
@@ -516,7 +530,9 @@ const toggleWire = (): void => {
 
 const updateWire = (): void => {
   if (!attachedAnchor) return;
-  const points = [playerPosition.clone(), attachedAnchor.position.clone()];
+  const middle=Vector3.Lerp(playerPosition,attachedAnchor.position,.5);
+  if(attachedAnchor.kind === 'jet') middle.y-=Math.min(4,Math.max(0,ropeLength-Vector3.Distance(playerPosition,attachedAnchor.position))*.5);
+  const points = [playerPosition.clone(), middle, attachedAnchor.position.clone()];
   if (!wireMesh) {
     wireMesh = MeshBuilder.CreateLines("active-wire", { points, updatable: true }, scene);
     wireMesh.color = Color3.FromHexString(COMIC.ink);
@@ -607,9 +623,10 @@ const resetStage = (): void => {
   specialAttack = null; lastAttack = null; player.rotation.x = 0;
   stageCleared = false;
   cameraYaw = 0;
-  cameraPitch = stageId === 1 ? -.12 : -.45;
+  cameraPitch = stageId === 3 ? .12 : stageId === 1 ? -.12 : -.45;
   giantClock = 0; updateMovingGiant(0);
-  select<HTMLElement>(".brand span").textContent = `STAGE 0${stageId} / ${stageId === 1 ? "TUTORIAL" : "TITAN DISTRICT"}`;
+  jetClock=0;jetRideSeconds=0;updateMovingJet(0);
+  select<HTMLElement>(".brand span").textContent = `STAGE 0${stageId} / ${stageId === 3 ? "SKY HUNTER" : stageId === 1 ? "TUTORIAL" : "TITAN DISTRICT"}`;
   camera.position.copyFrom(spawnPosition.add(new Vector3(0, 2.05, 0)).subtract(viewDirection().scale(14)));
   camera.setTarget(spawnPosition.add(new Vector3(0, 2.05, 0)));
   clearScreen.classList.add("is-hidden");
@@ -618,7 +635,8 @@ const resetStage = (): void => {
     coin.mesh.setEnabled(true);
     coin.mesh.scaling.setAll(1);
   }
-  showMessage(stageId === 1 ? "画面内の最寄りフックへWIRE → NEXTで乗り換え" : "STAGE 2 / 巡回する巨人を追い、コイン8枚と巨人撃破！", "normal");
+  if(stageId === 3) clearScreen.querySelector('p')!.replaceChildren('戦闘機で移動・巨人撃破！ コイン ',clearCoins,' / 12（ボーナス）');
+  showMessage(stageId === 3 ? "STAGE 3 / 戦闘機へWIRE！ 3秒以上移動し、巨人を倒せ" : stageId === 1 ? "画面内の最寄りフックへWIRE → NEXTで乗り換え" : "STAGE 2 / 巡回する巨人を追い、コイン8枚と巨人撃破！", "normal");
 };
 
 const updateHud = (): void => {
@@ -641,6 +659,10 @@ const updateHud = (): void => {
   else if (giantHp <= 0) objective.textContent = `あと${Math.max(0, 8 - coinsCollected)}枚のコインを集めよう`;
   else if (coinsCollected >= 8) objective.textContent = "巨人の弱点へ近づいて攻撃しよう";
   else objective.textContent = `コインを8枚集めて、巨人を倒せ（${coinsCollected} / 8）`;
+  if(stageId === 3) {
+    select<HTMLElement>('.eyebrow').textContent='SKY HUNTER / 戦闘機ワイヤー';
+    objective.textContent=stageCleared?'目標達成。STAGE CLEAR':jetRideSeconds<3?`戦闘機で3秒移動し、巨人を倒せ（${Math.min(3,jetRideSeconds).toFixed(1)} / 3秒）`:giantHp>0?'戦闘機から解除 → RUSH・DIVEで巨人を倒せ':'巨人撃破！ 戦闘機で3秒移動しよう';
+  }
 
   if (courseStage < 3) {
     const nextCourse = courseAnchorPositions[courseStage];
@@ -676,6 +698,11 @@ const updateHud = (): void => {
     }
   }
 
+  if(jetAnchor) {
+    const offset=jetAnchor.position.subtract(playerPosition),forward=new Vector3(Math.sin(cameraYaw),0,Math.cos(cameraYaw)),right=new Vector3(Math.cos(cameraYaw),0,-Math.sin(cameraYaw));
+    const heading=Vector3.Dot(offset.normalizeToNew(),forward)>.72?'正面':Vector3.Dot(offset.normalizeToNew(),forward)<-.2?'背後':Vector3.Dot(offset,right)>0?'右':'左';
+    routeReadout.textContent=attachedAnchor?.kind==='jet'?'✈ 接続中 / RELEASEで勢いを保って巨人へ':`✈ 戦闘機 ${Math.round(offset.length())}m・${heading} / ${offset.y>3?'上':offset.y< -3?'下':'同高度'} → 黄色い球へWIRE`;
+  }
   if (attachedAnchor) {
     anchorReadout.textContent = `● ${attachedAnchor.name} / ${Math.round(Vector3.Distance(playerPosition, attachedAnchor.position))}m`;
     wireLabel.textContent = "NEXT";
@@ -728,8 +755,8 @@ const updateCandidateMarker = (dt: number): void => {
 };
 
 const updateMovingGiant = (dt: number): void => {
-  if (stageId === 2 && giantHp > 0) giantClock += dt;
-  const pose = stageId === 2 ? giantPose(giantClock) : { position:[15,0,48] as [number,number,number], yaw:0 };
+  if (stageId !== 1 && giantHp > 0) giantClock += dt;
+  const pose = stageId !== 1 ? giantPose(giantClock) : { position:[15,0,48] as [number,number,number], yaw:0 };
   giantRoot.position.copyFromFloats(...pose.position); giantRoot.rotation.y = pose.yaw;
   const previousWeakpoint = weakpoint.position.clone();
   weakpoint.position.copyFromFloats(...giantPoint([0,14,-3.45], pose, stage.giantScale));
@@ -742,8 +769,18 @@ const updateMovingGiant = (dt: number): void => {
     anchor.motionDelta!.copyFrom(anchor.position.subtract(previous)); anchor.mesh.position.copyFrom(anchor.position);
   }
 };
+const updateMovingJet = (dt: number): void => {
+  if(!jetRoot || !jetAnchor)return;
+  jetClock+=dt;
+  const pose=jetPose(jetClock),previous=jetAnchor.position.clone();
+  jetRoot.position.copyFromFloats(...pose.position);jetRoot.rotation.set(pose.pitch,pose.yaw,pose.bank);
+  jetRoot.computeWorldMatrix(true);
+  jetAnchor.position.copyFrom(Vector3.TransformCoordinates(new Vector3(0,-2.1,0),jetRoot.getWorldMatrix()));
+  jetAnchor.motionDelta!.copyFrom(jetAnchor.position.subtract(previous));jetAnchor.mesh.position.copyFrom(jetAnchor.position);
+};
 const updatePhysicsStep = (dt: number): void => {
   updateMovingGiant(dt);
+  updateMovingJet(dt);
   boostTimer = Math.max(0, boostTimer - dt);
   boostCooldown = Math.max(0, boostCooldown - dt);
   if (boostTimer <= 0) boosting = false;
@@ -759,7 +796,10 @@ const updatePhysicsStep = (dt: number): void => {
     velocity.copyFromFloats(...guideAttack([playerPosition.x,playerPosition.y,playerPosition.z], [velocity.x,velocity.y,velocity.z], [weakpoint.position.x,weakpoint.position.y,weakpoint.position.z], dt));
     flightState.velocity = [velocity.x,velocity.y,velocity.z];
   }
-  if (attachedAnchor) {
+  if(attachedAnchor?.kind === 'jet') {
+    const forward=viewDirection(),anchorVelocity=dt>0?attachedAnchor.motionDelta!.scale(1/dt):Vector3.Zero();
+    stepTowed(flightState,attachedAnchor.position.asArray() as [number,number,number],anchorVelocity.asArray() as [number,number,number],[movement.x,0,movement.z],dt,isBoosting(),[forward.x,Math.max(0,forward.y),forward.z]);
+  } else if (attachedAnchor) {
     const forward = viewDirection();
     const delta = attachedAnchor.motionDelta ?? Vector3.Zero();
     const anchorVelocity = delta.scale(1/Math.max(dt,.000001));
@@ -806,6 +846,7 @@ const updatePhysicsStep = (dt: number): void => {
   }
   // Release on contact instead of repeatedly pulling the character into a roof
   // or fighting the wall correction on the following physics step.
+  if(attachedAnchor?.kind === "jet" && !touched && !grounded) jetRideSeconds+=dt;
   if (attachedAnchor && touched) {
     detachWire(false);
     showMessage(grounded ? "着地 / ワイヤー解除" : "壁に接触 / ワイヤー解除", "normal");
@@ -863,7 +904,7 @@ const updateWorld = (dt: number): void => {
     safePositionTimer = 0;
     lastSafePosition.copyFrom(playerPosition);
   }
-  if (!stageCleared && isStageClear(progress)) {
+  if (!stageCleared && (stageId === 3 ? jetMissionClear(giantHp,jetRideSeconds) : isStageClear(progress))) {
     stageCleared = true;
     appMenu.markClear();
     detachWire(false);
@@ -1017,7 +1058,14 @@ engine.runRenderLoop(() => {
   const now = performance.now();
   const dt = clamp((now - previousTime) / 1000, 0, 0.1);
   previousTime = now;
+  // Keep the initial catch pass available even on a slow first asset download.
+  if (!scene.isReady()) {
+    appMenu.setJetAudio(0);
+    if (now-lastMenuRender >= 250) { scene.render(); lastMenuRender=now; }
+    return;
+  }
   if (!appMenu.isPlaying()) {
+    appMenu.setJetAudio(0);
     if (now - lastMenuRender >= 250) { scene.render(); lastMenuRender = now; }
     return;
   }
@@ -1029,13 +1077,14 @@ engine.runRenderLoop(() => {
     updateCandidateMarker(dt);
     updateHud();
   }
+  appMenu.setJetAudio(jetAnchor && !stageCleared ? Math.max(0,1-Vector3.Distance(camera.position,jetAnchor.position)/200)*.8 : 0);
   art.updateEffects(dt);
   updateSky(dt);
   const wireOffset = attachedAnchor?.position.subtract(playerPosition);
   const wireLean = wireOffset ? Math.atan2(wireOffset.x*Math.sin(player.rotation.y)+wireOffset.z*Math.cos(player.rotation.y), Math.max(.5,wireOffset.y)) : 0;
   player.rotation.x = approach(player.rotation.x, specialAttack?.kind === "dive" ? .85 : specialAttack?.kind === "rush" ? .35 : 0, dt * 4);
   animateHero(dt, velocity.length(), grounded, !!attachedAnchor, wireLean);
-  animateGiant(stageId === 2 ? giantClock : now / 1000, giantHp, weakpointFlash, stageId === 2 && giantHp > 0);
+  animateGiant(stageId !== 1 ? giantClock : now / 1000, giantHp, weakpointFlash, stageId !== 1 && giantHp > 0);
   weakpoint.setEnabled(giantHp > 0);
   weakpointRing.setEnabled(giantHp > 0);
   scene.render();
@@ -1048,6 +1097,7 @@ if (import.meta.env.DEV) {
   Object.defineProperty(window, "skybreakDebug", { value: () => ({
     giantHooks:anchors.filter(anchor=>anchor.kind === "giant").map(anchor=>({name:anchor.name,position:anchor.position.asArray()})),
     stageId, giantClock, giantPosition:giantRoot.position.asArray(), giantYaw:giantRoot.rotation.y, giantScale:giantRoot.scaling.asArray(), heroScale:player.scaling.asArray(), weakpoint:weakpoint.position.asArray(), halfExtent:stage.halfExtent, launchHeight:stage.launchHeight, buildingTops:buildingLayouts.map(lot=>lot[4]),
+    jet: jetAnchor ? {position:jetAnchor.position.asArray(),clock:jetClock,rideSeconds:jetRideSeconds,pose:jetPose(jetClock)} : null,
     structureAnchors: structures.anchors.map(a=>({name:a.name,position:a.position.asArray()})),
     cameraYaw, cameraPitch,
     screen: document.querySelector("#game-shell")?.getAttribute("data-screen"), settings: appMenu.getSettings(),

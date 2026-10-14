@@ -208,3 +208,35 @@ const runs = [30, 60, 120].map((fps) => [fps, simulate(fps)]);
 const reference = runs[1][1].reconnectSpeeds;
 for (const [fps, result] of runs) assert.ok(result.reconnectSpeeds.every((value, index) => Math.abs(value - reference[index]) < 8), `frame-rate divergence at ${fps}Hz`);
 console.log(`flight verification: PASS (3 airborne anchors, release/reconnect, minheight ${Math.min(...runs.map(([, result]) => result.minHeight)).toFixed(2)}m, speeds ${reference.map((value) => value.toFixed(1)).join("/")}m/s, elapsed ${runs.map(([fps, result]) => `${fps}:${result.elapsed.toFixed(2)}s`).join(" ")})`);
+
+// A moving fighter may stretch the elastic line, but may not transfer velocity instantly.
+const slack={position:[0,50,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:25};
+flight.stepTowed(slack,[0,60,0],[0,0,25],[0,0,0],1/120,false);
+assert.equal(slack.velocity[2],0,"slack wire adds no aircraft velocity");
+assert.ok(slack.position[1]<50,"gravity still acts during slack");
+const towRuns=[30,60,120].map(fps=>{
+  const s={position:[0,106,0],velocity:[0,0,0],grounded:false,attached:true,ropeLength:26};
+  let previousVelocity=[...s.velocity];
+  for(let frame=0;frame<fps*6;frame++)substeps(1/fps,dt=>{
+    const t=frame/fps;
+    flight.stepTowed(s,[0,135,20*t],[0,0,20],[0,0,0],dt,false);
+    assert.ok(Math.hypot(...s.velocity.map((v,i)=>v-previousVelocity[i]))<.5,"tow acceleration has no abrupt impulse");
+    previousVelocity=[...s.velocity];
+  });
+  assert.ok(s.position[2]>65&&s.position[1]>85,"towing transports and supports an adult-weight player");
+  const before=[...s.velocity];flight.releaseFlight(s);assert.deepEqual(s.velocity,before,"fighter release keeps momentum");
+  return s;
+});
+assert.ok(towRuns.every(s=>Math.hypot(...s.position.map((v,i)=>v-towRuns[1].position[i]))<1),"towing is stable across frame rates");
+console.log("fighter wire verification: PASS (slack, bounded acceleration, carry, release momentum and 30/60/120Hz)");
+
+const fighterRecovery={position:[0,1.15,0],velocity:[0,0,0],grounded:true,attached:false,ropeLength:0};
+flight.attachToAnchor(fighterRecovery,[0,135,40],[0,0,1]);
+for(let i=1;i<=180;i++){
+ const previous=[...fighterRecovery.position];
+ flight.stepTowed(fighterRecovery,[0,135,40+i/120*12],[0,0,12],[0,0,0],1/120,false);
+ resolveFlightCollision(fighterRecovery,previous,[]);
+ assert.equal(fighterRecovery.grounded,false,"street reattach to aircraft remains airborne during winch recovery");
+}
+assert.ok(fighterRecovery.position[1]>5,"fighter winch lifts from street level");
+console.log("fighter street recovery: PASS");
